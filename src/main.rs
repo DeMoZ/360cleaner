@@ -1,4 +1,5 @@
-//! 360Cleaner — убирает фотографа и людей с 360° панорамы по двум кадрам с одной точки.
+//! 360Cleaner — убирает фотографа и людей с 360° панорамы по кадрам с одной точки.
+//! Одно фото — только пересохранение (размер, качество), два — фотограф, три и больше — прохожие.
 //! Окно: tao + wry (системный WebView), обработка: Rayon. Без нейросетей.
 //!
 //! Потоки. WebView живёт только в главном потоке, поэтому всё, что идёт в окно, отправляется событием
@@ -9,6 +10,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod donations;
+mod export;
 mod i18n;
 mod net;
 mod processor;
@@ -24,7 +26,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use settings::Settings;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, SyncSender, channel};
 use std::sync::{Arc, Mutex, MutexGuard};
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
@@ -33,12 +35,16 @@ use update::{Release, format_version};
 use wry::{DragDropEvent, WebViewBuilder};
 
 const IMAGE_EXTENSIONS: [&str; 5] = ["jpg", "jpeg", "png", "tif", "tiff"];
+/// Больше кадров расчёт не ускорит и не улучшит, а памяти на превью уйдёт много.
+const MAX_PHOTOS: usize = 16;
+/// Сколько фото открывается одновременно: каждое в полном размере занимает сотни мегабайт.
+const LOADERS: usize = 2;
 
 #[derive(Debug)]
 enum UserEvent {
     /// Скрипт для WebView (выполняется в главном потоке).
     Js(String),
-    PickFile(usize),
+    PickFiles,
     FilesDropped(Vec<PathBuf>),
     Save,
     Quit,
@@ -69,15 +75,21 @@ impl Ui {
     }
 }
 
-struct Slot {
+struct Photo {
+    id: u64,
     path: PathBuf,
-    preview: RgbImage,
+    /// Размер файла в пикселях.
+    dims: Option<(u32, u32)>,
+    /// None — ещё открывается.
+    preview: Option<RgbImage>,
 }
 
 /// Результат расчёта, по которому сохраняется файл.
 struct Computed {
     generation: u64,
-    alpha: Alpha,
+    /// Пути кадров по порядку и маски кадров 1.. (у одного фото масок нет).
+    paths: Vec<PathBuf>,
+    alphas: Vec<Alpha>,
 }
 
 #[derive(Default)]
@@ -89,7 +101,8 @@ struct UpdateState {
 }
 
 struct State {
-    slots: [Option<Slot>; 2],
+    photos: Vec<Photo>,
+    next_id: u64,
     params: Params,
     /// Растёт при каждой смене фото или параметров.
     generation: u64,
@@ -115,7 +128,11 @@ fn lock(state: &Shared) -> MutexGuard<'_, State> {
 struct Request {
     action: String,
     #[serde(default)]
-    slot: Option<usize>,
+    id: Option<u64>,
+    #[serde(default)]
+    size: Option<u32>,
+    #[serde(default)]
+    quality: Option<u8>,
     #[serde(default)]
     threshold: Option<f32>,
     #[serde(default)]
@@ -169,7 +186,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         swap: false,
     };
     let state: Shared = Arc::new(Mutex::new(State {
-        slots: [None, None],
+        photos: Vec::new(),
+        next_id: 1,
         params,
         generation: 0,
         computed: None,
@@ -187,6 +205,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (state, ui) = (Arc::clone(&state), ui.clone());
         std::thread::spawn(move || compute_worker(compute_rx, state, ui));
     }
+    let loader = start_loaders(&state, &ui, &compute_tx);
 
     let window = WindowBuilder::new()
         .with_title("360Cleaner")
@@ -233,18 +252,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 UserEvent::Js(script) => {
                     let _ = webview.evaluate_script(&script);
                 }
-                UserEvent::PickFile(slot) => {
-                    let lang = lock(&state).lang;
-                    let title = i18n::tr(lang, if slot == 0 { i18n::Text::PickFirst } else { i18n::Text::PickSecond });
-                    if let Some(file) = rfd::FileDialog::new()
-                        .set_title(title)
-                        .add_filter(i18n::tr(lang, i18n::Text::Photos), &IMAGE_EXTENSIONS)
-                        .pick_file()
-                    {
-                        load_file(slot, file, &state, &ui, &compute_tx);
+                UserEvent::PickFiles => {
+                    let (lang, dir) = {
+                        let st = lock(&state);
+                        (st.lang, st.photos.last().and_then(|p| p.path.parent().map(Path::to_path_buf)))
+                    };
+                    let mut dialog = rfd::FileDialog::new()
+                        .set_title(i18n::tr(lang, i18n::Text::PickPhotos))
+                        .add_filter(i18n::tr(lang, i18n::Text::Photos), &IMAGE_EXTENSIONS);
+                    if let Some(dir) = dir {
+                        dialog = dialog.set_directory(dir);
+                    }
+                    if let Some(files) = dialog.pick_files() {
+                        add_files(files, &state, &ui, &loader);
                     }
                 }
-                UserEvent::FilesDropped(paths) => files_dropped(paths, &state, &ui, &compute_tx),
+                UserEvent::FilesDropped(paths) => add_files(paths, &state, &ui, &loader),
                 UserEvent::Save => save(&state, &ui),
                 UserEvent::Quit => *control_flow = ControlFlow::Exit,
             },
@@ -267,6 +290,9 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
                 "version": env!("CARGO_PKG_VERSION"),
                 "repo": update::REPO,
                 "threshold": p.threshold, "dilate": p.dilate, "feather": p.feather,
+                "exportWidth": st.settings.export_width, "exportQuality": st.settings.export_quality,
+                "exportWidths": export::WIDTHS,
+                "colors": processor::SOURCE_COLORS,
                 "autoUpdate": st.settings.auto_update,
                 "canUpdate": update::install_target().is_some(),
                 "updateFailed": std::env::args().any(|a| a == "--update-failed"),
@@ -278,6 +304,7 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
             if auto {
                 check_updates(state, ui, false);
             }
+            ui.send(photos_msg(&lock(state)));
             // фото из командной строки: `360Cleaner a.jpg b.jpg`
             let paths: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).filter(|p| p.is_file()).collect();
             if !paths.is_empty() {
@@ -285,9 +312,27 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
             }
         }
         "pick" => {
-            if let Some(slot @ 0..=1) = req.slot {
-                let _ = proxy.send_event(UserEvent::PickFile(slot));
+            let _ = proxy.send_event(UserEvent::PickFiles);
+        }
+        "remove" => {
+            let mut st = lock(state);
+            let before = st.photos.len();
+            st.photos.retain(|p| Some(p.id) != req.id);
+            if st.photos.len() != before {
+                photos_changed(&mut st, ui);
+                drop(st);
+                let _ = compute.send(());
             }
+        }
+        "clear" => {
+            let mut st = lock(state);
+            st.photos.clear();
+            photos_changed(&mut st, ui);
+            ui.status("stReady", json!({}), false);
+        }
+        "export_options" => {
+            let mut st = lock(state);
+            set_export_options(&mut st, &req);
         }
         "params" => {
             let mut st = lock(state);
@@ -311,6 +356,7 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
             let _ = compute.send(());
         }
         "save" => {
+            set_export_options(&mut lock(state), &req);
             let _ = proxy.send_event(UserEvent::Save);
         }
         "reveal" => {
@@ -364,110 +410,202 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
     }
 }
 
+fn set_export_options(st: &mut State, req: &Request) {
+    let s = &mut st.settings;
+    let (old_w, old_q) = (s.export_width, s.export_quality);
+    if let Some(w) = req.size {
+        s.export_width = if export::WIDTHS.contains(&w) { w } else { 0 };
+    }
+    if let Some(q) = req.quality {
+        s.export_quality = q.clamp(settings::MIN_QUALITY, 100);
+    }
+    if (s.export_width, s.export_quality) != (old_w, old_q) {
+        s.save();
+    }
+}
+
 // ---------------------------------------------------------------- фото
 
-fn files_dropped(paths: Vec<PathBuf>, state: &Shared, ui: &Ui, compute: &Sender<()>) {
+/// Список фото для окна: порядок, имена, размеры; картинки приходят отдельно (`photo_loaded`).
+fn photos_msg(st: &State) -> Value {
+    let list: Vec<Value> = st
+        .photos
+        .iter()
+        .map(|p| {
+            json!({
+                "id": p.id,
+                "name": file_name(&p.path),
+                "size": p.dims.map(|(w, h)| format!("{w}×{h}")),
+                "width": p.dims.map(|d| d.0),
+                "loading": p.preview.is_none(),
+            })
+        })
+        .collect();
+    json!({"type": "photos", "list": list})
+}
+
+/// После любой смены списка: старый расчёт больше не годится.
+fn photos_changed(st: &mut State, ui: &Ui) {
+    st.generation += 1;
+    st.computed = None;
+    ui.send(photos_msg(st));
+}
+
+/// Новые фото — в конец списка; уже добавленные пропускаются. Расчёт запустится, когда откроется последнее.
+fn add_files(paths: Vec<PathBuf>, state: &Shared, ui: &Ui, loader: &SyncSender<(u64, PathBuf)>) {
     let images: Vec<PathBuf> = paths.into_iter().filter(|p| is_image(p)).collect();
-    match images.as_slice() {
-        [] => ui.error("errDropTypes", json!({})),
-        [one] => {
-            let st = lock(state);
-            // одно фото — в первый пустой слот, если оба заняты — во второй
-            let slot = if st.slots[0].is_none() { 0 } else { 1 };
-            drop(st);
-            load_file(slot, one.clone(), state, ui, compute);
+    if images.is_empty() {
+        ui.error("errDropTypes", json!({}));
+        return;
+    }
+    let mut st = lock(state);
+    let mut added = Vec::new();
+    for path in images {
+        if st.photos.iter().any(|p| p.path == path) {
+            continue;
         }
-        [a, b, ..] => {
-            load_file(0, a.clone(), state, ui, compute);
-            load_file(1, b.clone(), state, ui, compute);
+        if st.photos.len() >= MAX_PHOTOS {
+            ui.error("errTooMany", json!({"n": MAX_PHOTOS}));
+            break;
+        }
+        let id = st.next_id;
+        st.next_id += 1;
+        st.photos.push(Photo { id, path: path.clone(), dims: None, preview: None });
+        added.push((id, path));
+    }
+    if added.is_empty() {
+        return;
+    }
+    photos_changed(&mut st, ui);
+    drop(st);
+    for job in added {
+        if loader.send(job).is_err() {
+            break;
         }
     }
 }
 
-fn load_file(slot: usize, path: PathBuf, state: &Shared, ui: &Ui, compute: &Sender<()>) {
-    let (state, ui, compute) = (Arc::clone(state), ui.clone(), compute.clone());
-    std::thread::spawn(move || {
-        let name = file_name(&path);
-        ui.send(json!({"type": "slot_loading", "slot": slot, "name": name}));
-        ui.status("stLoading", json!({"n": slot + 1, "name": name}), true);
-        let full_size = image::image_dimensions(&path).ok();
-        match processor::load_image(&path, Some(processor::PREVIEW_DIM)) {
-            Ok(preview) => {
-                let mut warning = None;
-                if let Some((w, h)) = full_size
-                    && (w as f32 / h as f32 - 2.0).abs() > 0.05
-                {
-                    warning = Some(("warnNot360", json!({"name": name, "w": w, "h": h})));
-                }
-                let image_b64 = jpeg_b64(&preview, 85);
-                let mut st = lock(&state);
-                st.slots[slot] = Some(Slot { path, preview });
-                st.generation += 1;
-                st.computed = None;
-                if let [Some(a), Some(b)] = &st.slots {
-                    let (da, db) = (image::image_dimensions(&a.path).ok(), image::image_dimensions(&b.path).ok());
-                    if da != db && warning.is_none() {
-                        warning = Some(("warnSizes", json!({})));
-                    }
-                }
-                let both = st.slots.iter().all(Option::is_some);
-                drop(st);
-                ui.send(json!({
-                    "type": "file_loaded", "slot": slot, "name": name, "image_b64": image_b64,
-                    "size": full_size.map(|(w, h)| format!("{w}×{h}")),
-                }));
-                if let Some((key, args)) = warning {
-                    ui.send(json!({"type": "warning", "key": key, "args": args}));
-                }
-                if both {
-                    let _ = compute.send(());
-                } else {
-                    ui.status("stNeedSecond", json!({"name": name}), false);
-                }
+/// Потоки, открывающие фото по очереди (`LOADERS` одновременно).
+fn start_loaders(state: &Shared, ui: &Ui, compute: &Sender<()>) -> SyncSender<(u64, PathBuf)> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<(u64, PathBuf)>(MAX_PHOTOS * 4);
+    let rx = Arc::new(Mutex::new(rx));
+    for _ in 0..LOADERS {
+        let (rx, state, ui, compute) = (Arc::clone(&rx), Arc::clone(state), ui.clone(), compute.clone());
+        std::thread::spawn(move || {
+            loop {
+                let job = rx.lock().unwrap_or_else(|e| e.into_inner()).recv();
+                let Ok((id, path)) = job else { break };
+                load_photo(id, path, &state, &ui, &compute);
             }
-            Err(e) => {
-                ui.send(json!({"type": "slot_failed", "slot": slot}));
-                ui.error("errOpen", json!({"name": name, "err": e}));
+        });
+    }
+    tx
+}
+
+fn load_photo(id: u64, path: PathBuf, state: &Shared, ui: &Ui, compute: &Sender<()>) {
+    if !lock(state).photos.iter().any(|p| p.id == id) {
+        return; // убрали из списка, пока ждало очереди
+    }
+    let name = file_name(&path);
+    ui.status("stLoading", json!({"name": name}), true);
+    let dims = image::image_dimensions(&path).ok();
+    match processor::load_image(&path, Some(processor::PREVIEW_DIM)) {
+        Ok(preview) => {
+            let image_b64 = jpeg_b64(&preview, 85);
+            let mut st = lock(state);
+            let first = st.photos.first().and_then(|p| p.dims);
+            let Some(photo) = st.photos.iter_mut().find(|p| p.id == id) else { return };
+            photo.preview = Some(preview);
+            photo.dims = dims;
+            let mut warning = None;
+            if let Some((w, h)) = dims
+                && (w as f32 / h as f32 - 2.0).abs() > 0.05
+            {
+                warning = Some(("warnNot360", json!({"name": name, "w": w, "h": h})));
+            } else if first.is_some() && dims.is_some() && first != dims && st.photos[0].id != id {
+                warning = Some(("warnSizes", json!({"name": name})));
+            }
+            ui.send(json!({"type": "photo_loaded", "id": id, "image_b64": image_b64}));
+            photos_changed(&mut st, ui);
+            let waiting = st.photos.iter().any(|p| p.preview.is_none());
+            drop(st);
+            if let Some((key, args)) = warning {
+                ui.send(json!({"type": "warning", "key": key, "args": args}));
+            }
+            if !waiting {
+                let _ = compute.send(());
             }
         }
-    });
+        Err(e) => {
+            let mut st = lock(state);
+            st.photos.retain(|p| p.id != id);
+            photos_changed(&mut st, ui);
+            let waiting = st.photos.iter().any(|p| p.preview.is_none());
+            drop(st);
+            ui.error("errOpen", json!({"name": name, "err": e}));
+            if !waiting {
+                let _ = compute.send(());
+            }
+        }
+    }
 }
 
 fn compute_worker(rx: Receiver<()>, state: Shared, ui: Ui) {
     while rx.recv().is_ok() {
         // из накопившихся запросов нужен только последний
         while rx.try_recv().is_ok() {}
-        let (img1, img2, params, generation) = {
+        let (frames, paths, params, generation) = {
             let st = lock(&state);
-            let [Some(a), Some(b)] = &st.slots else { continue };
+            if st.photos.is_empty() || st.photos.iter().any(|p| p.preview.is_none()) {
+                continue;
+            }
             if st.computed.as_ref().is_some_and(|c| c.generation == st.generation) {
                 continue;
             }
-            (a.preview.clone(), b.preview.clone(), st.params, st.generation)
+            let frames: Vec<RgbImage> = st.photos.iter().filter_map(|p| p.preview.clone()).collect();
+            let paths: Vec<PathBuf> = st.photos.iter().map(|p| p.path.clone()).collect();
+            (frames, paths, st.params, st.generation)
         };
-        ui.processing("procPreview");
-        let (w, h) = img1.dimensions();
-        let img2 = processor::match_size(img2, w, h);
+        let n = frames.len();
+        if n > 1 {
+            ui.processing("procPreview");
+        }
+        let (w, h) = frames[0].dimensions();
+        let mut frames = frames.into_iter();
+        let first = frames.next().unwrap_or_default();
+        let others: Vec<RgbImage> = frames.map(|f| processor::match_size(f, w, h)).collect();
         let started = std::time::Instant::now();
-        let preview = processor::compute_preview(&img1, &img2, params);
-        let elapsed = started.elapsed().as_millis();
+        let mut msg = json!({"type": "preview_ready", "count": n});
+        let (result, mask, alphas) = match others.len() {
+            0 => (first, None, Vec::new()),
+            1 => {
+                let p = processor::compute_preview(&first, &others[0], params);
+                msg["angle_a"] = json!(p.angles.angle_a.to_degrees());
+                msg["angle_b"] = json!(p.angles.angle_b.to_degrees());
+                msg["changed"] = json!(p.changed);
+                (p.result, Some(p.mask_vis), vec![p.alpha])
+            }
+            _ => {
+                let mut all = Vec::with_capacity(n);
+                all.push(first);
+                all.extend(others);
+                let p = processor::compute_stack_preview(&all, params);
+                msg["changed"] = json!(p.changed);
+                (p.result, Some(p.mask_vis), p.alphas)
+            }
+        };
+        msg["ms"] = json!(started.elapsed().as_millis());
 
         let mut st = lock(&state);
         if st.generation != generation {
             // фото или параметры поменялись во время расчёта: этот результат никому не нужен
             continue;
         }
-        st.computed = Some(Computed { generation, alpha: preview.alpha });
+        st.computed = Some(Computed { generation, paths, alphas });
         drop(st);
-        ui.send(json!({
-            "type": "preview_ready",
-            "result_b64": jpeg_b64(&preview.result, 90),
-            "mask_b64": jpeg_b64(&preview.mask_vis, 85),
-            "angle_a": preview.angles.angle_a.to_degrees(),
-            "angle_b": preview.angles.angle_b.to_degrees(),
-            "changed": preview.changed,
-            "ms": elapsed,
-        }));
+        msg["result_b64"] = json!(jpeg_b64(&result, 90));
+        msg["mask_b64"] = json!(mask.map(|m| jpeg_b64(&m, 85)));
+        ui.send(msg);
     }
 }
 
@@ -476,30 +614,40 @@ fn save(state: &Shared, ui: &Ui) {
     if st.exporting {
         return;
     }
-    let [Some(a), Some(b)] = &st.slots else {
-        ui.error("errNeedBoth", json!({}));
+    if st.photos.is_empty() {
+        ui.error("errNoPhotos", json!({}));
         return;
-    };
+    }
     let Some(computed) = st.computed.as_ref().filter(|c| c.generation == st.generation) else {
         ui.error("errWaitPreview", json!({}));
         return;
     };
-    let (path1, path2, alpha, lang) = (a.path.clone(), b.path.clone(), computed.alpha.clone(), st.lang);
+    let (paths, alphas, lang) = (computed.paths.clone(), computed.alphas.clone(), st.lang);
+    let options = export::Options { width: st.settings.export_width, quality: st.settings.export_quality };
+    let dims = st.photos[0].dims;
     drop(st);
 
-    let stem = path1.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+    let first = &paths[0];
+    let resized = dims.is_some_and(|(w, h)| export::target_dims(w, h, options.width) != (w, h));
+    let stem = first.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+    let suffix = match (paths.len() > 1, resized) {
+        (true, true) => format!("_clean_{}", options.width),
+        (true, false) => "_clean".to_string(),
+        (false, true) => format!("_{}", options.width),
+        (false, false) => format!("_q{}", options.quality),
+    };
     let mut dialog = rfd::FileDialog::new()
         .set_title(i18n::tr(lang, i18n::Text::SaveTitle))
-        .set_file_name(format!("{stem}_clean.jpg"))
+        .set_file_name(format!("{stem}{suffix}.jpg"))
         .add_filter("JPEG", &["jpg", "jpeg"]);
-    if let Some(dir) = path1.parent() {
+    if let Some(dir) = first.parent() {
         dialog = dialog.set_directory(dir);
     }
     let Some(mut out) = dialog.save_file() else { return };
     if !out.extension().is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")) {
         out.set_extension("jpg");
     }
-    if out == path1 || out == path2 {
+    if paths.contains(&out) {
         ui.error("errOverwrite", json!({}));
         return;
     }
@@ -508,14 +656,17 @@ fn save(state: &Shared, ui: &Ui) {
     let (state, ui) = (Arc::clone(state), ui.clone());
     std::thread::spawn(move || {
         ui.processing("procSave");
-        let result = export(&path1, &path2, &alpha, &out);
+        let result = export::export(&paths, &alphas, options, &out);
         let mut st = lock(&state);
         st.exporting = false;
         match result {
-            Ok(()) => {
+            Ok(saved) => {
                 st.last_saved = Some(out.clone());
                 drop(st);
-                ui.send(json!({"type": "save_success", "path": out.to_string_lossy(), "name": file_name(&out)}));
+                ui.send(json!({
+                    "type": "save_success", "path": out.to_string_lossy(), "name": file_name(&out),
+                    "w": saved.width, "h": saved.height, "mb": format!("{:.1}", saved.bytes as f64 / 1_048_576.0),
+                }));
             }
             Err(e) => {
                 drop(st);
@@ -523,25 +674,6 @@ fn save(state: &Shared, ui: &Ui) {
             }
         }
     });
-}
-
-fn export(path1: &Path, path2: &Path, alpha: &Alpha, out: &Path) -> Result<(), String> {
-    let mut base = processor::load_image(path1, None)?;
-    let (w, h) = base.dimensions();
-    let other = processor::match_size(processor::load_image(path2, None)?, w, h);
-    processor::blend_into(&mut base, &other, alpha);
-    drop(other);
-    let jpeg = jpeg_bytes(&base, 95)?;
-    drop(base);
-    let markers = std::fs::read(path1).map(|b| xmp::extract_jpeg_markers(&b)).unwrap_or_default();
-    let bytes = xmp::inject_markers(&jpeg, &markers);
-    // сначала во временный файл рядом, потом переименование: при сбое старый файл не испортится
-    let tmp = out.with_extension("jpg.part");
-    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, out).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        e.to_string()
-    })
 }
 
 // ---------------------------------------------------------------- донаты
@@ -666,47 +798,4 @@ fn install_update(state: &Shared, ui: &Ui, proxy: &EventLoopProxy<UserEvent>) {
             Err(e) => ui.send(update_msg(&st, Some(("err", "updFailed", json!({"err": e}))))),
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn export_keeps_size_and_360_metadata() {
-        let dir = std::env::temp_dir().join(format!("cleaner360_export_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let (w, h) = (800u32, 400u32);
-        let frame = |px: u32| {
-            RgbImage::from_fn(w, h, |x, y| {
-                if x.abs_diff(px) < 20 && y > 150 && y < 300 {
-                    image::Rgb([220, 30, 30])
-                } else {
-                    image::Rgb([(x * 255 / w) as u8, 110, (y * 255 / h) as u8])
-                }
-            })
-        };
-        let xmp = b"\xFF\xE1\x00\x2Ahttp://ns.adobe.com/xap/1.0/\x00GPano:equirect";
-        let mut xmp = xmp.to_vec();
-        let len = xmp.len() - 2;
-        xmp[2..4].copy_from_slice(&(len as u16).to_be_bytes());
-        let (a, b, out) = (dir.join("a.jpg"), dir.join("b.jpg"), dir.join("out.jpg"));
-        std::fs::write(&a, xmp::inject_markers(&jpeg_bytes(&frame(200), 95).unwrap(), &[xmp.clone()])).unwrap();
-        std::fs::write(&b, jpeg_bytes(&frame(600), 95).unwrap()).unwrap();
-
-        let small = |p: &Path| processor::load_image(p, Some(400)).unwrap();
-        let preview =
-            processor::compute_preview(&small(&a), &small(&b), Params { dilate: 6, feather: 3, ..Default::default() });
-        export(&a, &b, &preview.alpha, &out).unwrap();
-
-        let saved = std::fs::read(&out).unwrap();
-        assert_eq!(xmp::extract_jpeg_markers(&saved), vec![xmp]);
-        let img = image::load_from_memory(&saved).unwrap().to_rgb8();
-        assert_eq!(img.dimensions(), (w, h));
-        // одна из двух зон без человека: в его месте нет ярко-красного
-        let red = |x: u32| (160..290).filter(|&y| img.get_pixel(x, y)[0] > 200 && img.get_pixel(x, y)[1] < 60).count();
-        assert!(red(200) == 0 || red(600) == 0, "both people are still there");
-        assert!(!dir.join("out.jpg.part").exists());
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
 }
