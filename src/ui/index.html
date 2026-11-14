@@ -3,814 +3,1158 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>360Cleaner — Удаление человека с 360° фото</title>
+<title>360Cleaner</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: #0b0f19;
-    color: #e2e8f0;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
+/* =========================================================
+   DESIGN SYSTEM — 360Cleaner 2025
+   Aesthetic: Dark bento-grid + glassmorphism + gradient glow
+   ========================================================= */
 
-  /* Top Drop Zones */
-  .header {
-    padding: 10px 16px;
-    background: #111827;
-    border-bottom: 1px solid #1f2937;
-    display: flex;
-    gap: 12px;
-  }
-  .dropzone {
-    flex: 1;
-    border: 2px dashed #374151;
-    border-radius: 10px;
-    padding: 10px 14px;
-    background: #1e293b;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .dropzone:hover, .dropzone.dragover {
-    border-color: #38bdf8;
-    background: #22354f;
-  }
-  .dropzone .icon { font-size: 26px; }
-  .dropzone .info { overflow: hidden; }
-  .dropzone .title { font-size: 13px; font-weight: 700; color: #f8fafc; }
-  .dropzone .desc { font-size: 11px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .dropzone.loaded { border-color: #10b981; background: #064e3b22; }
-  .dropzone.loaded .desc { color: #34d399; font-weight: 600; }
+:root {
+  --bg-base:        #080c14;
+  --bg-surface:     #0e1420;
+  --bg-card:        #111827;
+  --bg-card2:       #0f1929;
+  --bg-glass:       rgba(255,255,255,0.03);
+  --border:         rgba(255,255,255,0.07);
+  --border-hover:   rgba(99,179,237,0.4);
+  --accent-blue:    #3b82f6;
+  --accent-cyan:    #06b6d4;
+  --accent-violet:  #8b5cf6;
+  --accent-emerald: #10b981;
+  --accent-orange:  #f59e0b;
+  --text-primary:   #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted:     #475569;
+  --radius-sm:      8px;
+  --radius-md:      12px;
+  --radius-lg:      18px;
+  --radius-xl:      24px;
+  --transition:     0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --glow-blue:      0 0 24px rgba(59,130,246,0.25);
+  --glow-violet:    0 0 24px rgba(139,92,246,0.25);
+  --glow-emerald:   0 0 24px rgba(16,185,129,0.25);
+}
 
-  /* Controls Panel */
-  .controls-bar {
-    padding: 8px 16px;
-    background: #151d2f;
-    border-bottom: 1px solid #1e293b;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-  }
-  .sliders-group {
-    display: flex;
-    align-items: center;
-    gap: 18px;
-    flex-wrap: wrap;
-  }
-  .slider-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: #cbd5e1;
-  }
-  .slider-item label { min-width: 140px; }
-  .slider-item input[type="range"] {
-    accent-color: #38bdf8;
-    width: 100px;
-    cursor: pointer;
-  }
-  .slider-item .val {
-    min-width: 24px;
-    font-weight: 700;
-    color: #38bdf8;
-    text-align: right;
-  }
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-user-select: none; user-select: none; }
 
-  .buttons-group {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .btn {
-    border: none;
-    border-radius: 6px;
-    padding: 7px 13px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .btn-swap { background: #7c3aed; color: #fff; }
-  .btn-swap:hover { background: #6d28d9; }
-  .btn-save { background: #059669; color: #fff; }
-  .btn-save:hover { background: #047857; }
-  .btn-secondary { background: #334155; color: #f1f5f9; }
-  .btn-secondary:hover { background: #475569; }
-  .btn-mode-toggle {
-    background: #0284c7;
-    color: #fff;
-    font-weight: 700;
-    box-shadow: 0 0 10px rgba(2, 132, 199, 0.4);
-  }
-  .btn-mode-toggle:hover { background: #0369a1; }
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: 13px;
+}
 
-  /* Toolbar: Mode, Aspect Ratio, Zoom */
-  .toolbar {
-    padding: 6px 16px;
-    background: #0f172a;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid #1e293b;
-    font-size: 12px;
-  }
-  .tab-group {
-    display: flex;
-    gap: 6px;
-  }
-  .tab-btn {
-    background: transparent;
-    border: 1px solid #334155;
-    color: #94a3b8;
-    padding: 5px 10px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 11px;
-    font-weight: 600;
-  }
-  .tab-btn.active {
-    background: #1e293b;
-    border-color: #38bdf8;
-    color: #38bdf8;
-  }
+/* ── Top Header Bar ─────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
 
-  .view-controls {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .aspect-select {
-    background: #1e293b;
-    border: 1px solid #334155;
-    color: #f1f5f9;
-    padding: 4px 8px;
-    border-radius: 6px;
-    font-size: 11px;
-    cursor: pointer;
-    outline: none;
-  }
-  .zoom-controls {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 6px;
-    padding: 2px 4px;
-  }
-  .zoom-btn {
-    background: transparent;
-    border: none;
-    color: #cbd5e1;
-    font-size: 14px;
-    font-weight: 700;
-    width: 24px;
-    height: 22px;
-    cursor: pointer;
-    border-radius: 4px;
-  }
-  .zoom-btn:hover { background: #334155; }
-  .zoom-val { font-size: 11px; min-width: 38px; text-align: center; color: #38bdf8; font-weight: 600; }
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.logo-icon {
+  width: 30px;
+  height: 30px;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-violet));
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+}
+.logo-text {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  background: linear-gradient(90deg, #fff, #94a3b8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.logo-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--accent-blue);
+  background: rgba(59,130,246,0.1);
+  border: 1px solid rgba(59,130,246,0.25);
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
 
-  /* Main Viewport Container */
-  .viewport-container {
-    flex: 1;
-    position: relative;
-    background: #020617;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-  }
+.header-sep { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
 
-  /* Aspect Ratio Framing Box */
-  .aspect-frame {
-    position: relative;
-    box-shadow: 0 0 30px rgba(0,0,0,0.8);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #000;
-    overflow: hidden;
-    transition: aspect-ratio 0.2s ease, width 0.2s ease, height 0.2s ease;
-  }
+/* ── Drop Zone Cards (Bento style) ──────────────────────── */
+.drop-row {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+}
 
-  /* 360 WebGL Canvas */
-  #webgl-360-canvas {
-    width: 100%;
-    height: 100%;
-    display: none;
-    cursor: grab;
-  }
-  #webgl-360-canvas:active { cursor: grabbing; }
+.drop-card {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition);
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+}
+.drop-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 60%, rgba(59,130,246,0.04));
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+.drop-card:hover { border-color: var(--border-hover); background: #131e30; }
+.drop-card:hover::before { opacity: 1; }
+.drop-card.dragover {
+  border-color: var(--accent-blue);
+  background: rgba(59,130,246,0.08);
+  box-shadow: var(--glow-blue), inset 0 0 0 1px rgba(59,130,246,0.3);
+}
+.drop-card.loaded { border-color: rgba(16,185,129,0.4); }
 
-  /* 2D Flat Canvas */
-  #flat-canvas {
-    width: 100%;
-    height: 100%;
-    display: block;
-    cursor: grab;
-  }
-  #flat-canvas:active { cursor: grabbing; }
+.drop-thumb {
+  width: 72px;
+  height: 40px;
+  border-radius: 6px;
+  background: var(--bg-glass);
+  border: 1px dashed var(--text-muted);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: all var(--transition);
+}
+.drop-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 5px;
+}
+.drop-thumb .placeholder-icon {
+  font-size: 20px;
+  opacity: 0.4;
+  transition: all var(--transition);
+}
+.drop-card:hover .placeholder-icon { opacity: 0.7; }
+.drop-card.loaded .drop-thumb { border-color: rgba(16,185,129,0.4); }
 
-  /* Status Bar */
-  .status-bar {
-    padding: 4px 16px;
-    background: #090d16;
-    border-top: 1px solid #1e293b;
-    font-size: 11px;
-    color: #94a3b8;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
+.drop-info { overflow: hidden; }
+.drop-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.drop-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drop-card.loaded .drop-name { color: var(--accent-emerald); font-weight: 600; }
 
-  /* Loading Spinner */
-  .loading-overlay {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(11, 15, 25, 0.85);
-    display: none;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    z-index: 100;
-  }
-  .spinner {
-    width: 36px;
-    height: 36px;
-    border: 3px solid #1e293b;
-    border-top: 3px solid #38bdf8;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin { 100% { transform: rotate(360deg); } }
+.drop-action {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: color var(--transition);
+}
+.drop-card:hover .drop-action { color: var(--accent-blue); }
 
-  /* Empty placeholder state */
-  .empty-state {
-    position: absolute;
-    color: #64748b;
-    text-align: center;
-    pointer-events: none;
-    font-size: 14px;
-    line-height: 1.6;
-  }
+/* ── Main Layout ─────────────────────────────────────────── */
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 0;
+}
+
+/* ── Left Sidebar (Controls) ─────────────────────────────── */
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 12px;
+  gap: 20px;
+  overflow-y: auto;
+}
+
+.sidebar-section { display: flex; flex-direction: column; gap: 10px; }
+
+.section-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-left: 2px;
+}
+
+/* Sliders */
+.slider-block { display: flex; flex-direction: column; gap: 6px; }
+.slider-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.slider-name { font-size: 11px; color: var(--text-secondary); font-weight: 500; }
+.slider-val {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-blue);
+  font-variant-numeric: tabular-nums;
+  min-width: 28px;
+  text-align: right;
+}
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  position: relative;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: var(--accent-blue);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(59,130,246,0.5);
+  transition: transform var(--transition);
+}
+input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); }
+
+/* Buttons */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  letter-spacing: 0.1px;
+  width: 100%;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent-blue), #2563eb);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(59,130,246,0.3);
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(59,130,246,0.4); }
+.btn-primary:active { transform: translateY(0); }
+
+.btn-violet {
+  background: linear-gradient(135deg, var(--accent-violet), #7c3aed);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(139,92,246,0.3);
+}
+.btn-violet:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(139,92,246,0.4); }
+
+.btn-emerald {
+  background: linear-gradient(135deg, var(--accent-emerald), #059669);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(16,185,129,0.3);
+}
+.btn-emerald:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(16,185,129,0.4); }
+
+.btn-ghost {
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.btn-ghost:hover { border-color: var(--border-hover); color: var(--text-primary); background: rgba(255,255,255,0.05); }
+
+/* ── View Tab Pills ──────────────────────────────────────── */
+.view-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+  text-align: left;
+  width: 100%;
+}
+.tab-btn:hover { background: rgba(255,255,255,0.04); color: var(--text-secondary); }
+.tab-btn.active {
+  background: rgba(59,130,246,0.12);
+  color: var(--accent-blue);
+  font-weight: 600;
+}
+.tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Aspect Ratio Select */
+.select-wrapper {
+  position: relative;
+}
+.aspect-select {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: all var(--transition);
+}
+.aspect-select:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.select-arrow {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+/* Zoom Controls */
+.zoom-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.zoom-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition);
+  flex-shrink: 0;
+  line-height: 1;
+}
+.zoom-btn:hover { border-color: var(--border-hover); color: var(--text-primary); background: rgba(255,255,255,0.08); }
+.zoom-display {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-blue);
+  font-variant-numeric: tabular-nums;
+  background: rgba(59,130,246,0.08);
+  border: 1px solid rgba(59,130,246,0.15);
+  border-radius: 6px;
+  padding: 5px 0;
+}
+.zoom-reset {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+.zoom-reset:hover { color: var(--text-secondary); border-color: var(--border-hover); }
+
+/* ── Main Canvas Viewport ─────────────────────────────────── */
+.viewport {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-base);
+  position: relative;
+}
+
+.canvas-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 60% 40% at 30% 50%, rgba(59,130,246,0.03) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 40% at 70% 50%, rgba(139,92,246,0.03) 0%, transparent 70%),
+    var(--bg-base);
+}
+
+/* Animated grain texture */
+.canvas-area::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.aspect-frame {
+  position: relative;
+  box-shadow: 0 0 0 1px var(--border), 0 24px 60px rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+  transition: width 0.25s ease, height 0.25s ease;
+  z-index: 1;
+}
+
+#flat-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  image-rendering: auto;
+}
+#flat-canvas:active { cursor: grabbing; }
+
+#webgl-360-canvas {
+  width: 100%;
+  height: 100%;
+  display: none;
+  cursor: grab;
+}
+#webgl-360-canvas:active { cursor: grabbing; }
+
+/* Empty state */
+.empty-state {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-muted);
+  pointer-events: none;
+  z-index: 2;
+  text-align: center;
+  padding: 20px;
+}
+.empty-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  margin-bottom: 4px;
+}
+.empty-title { font-size: 15px; font-weight: 600; color: var(--text-secondary); }
+.empty-desc { font-size: 12px; line-height: 1.6; max-width: 280px; }
+
+/* ── Loading Overlay ──────────────────────────────────────── */
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(8,12,20,0.75);
+  backdrop-filter: blur(4px);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  z-index: 50;
+  border-radius: 10px;
+}
+.loading-ring {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255,255,255,0.08);
+  border-top: 3px solid var(--accent-blue);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { 100% { transform: rotate(360deg); } }
+.loading-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.2px;
+}
+
+/* ── Status Bar ─────────────────────────────────────────── */
+.statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 16px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  margin-right: 8px;
+  transition: background var(--transition);
+  flex-shrink: 0;
+}
+.status-dot.ready { background: var(--accent-emerald); }
+.status-dot.busy { background: var(--accent-orange); animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.4; } }
+.status-left { display: flex; align-items: center; color: var(--text-secondary); font-size: 11px; }
+.status-right { font-size: 11px; color: var(--accent-blue); font-weight: 600; }
+
+/* ── Divider ─────────────────────────────────────────────── */
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+/* ── Toggle 360 btn inline in sidebar ───────────────────── */
+.btn-toggle-360 {
+  background: linear-gradient(135deg, #0ea5e9, var(--accent-violet));
+  color: #fff;
+  box-shadow: 0 2px 14px rgba(14,165,233,0.3);
+}
+.btn-toggle-360:hover { transform: translateY(-1px); box-shadow: 0 4px 22px rgba(14,165,233,0.45); }
+.btn-toggle-360.active-360 {
+  background: linear-gradient(135deg, var(--accent-violet), #6d28d9);
+  box-shadow: 0 2px 14px rgba(139,92,246,0.4);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
 </style>
 </head>
 <body>
 
-  <!-- Top Section: Drop Zones -->
-  <div class="header">
-    <div class="dropzone" id="dz1" onclick="sendToRust('pick_file_1')">
-      <div class="icon">📷</div>
-      <div class="info">
-        <div class="title">Фото 1 (Человек на позиции A)</div>
-        <div class="desc" id="f1_name">Перетащите файл сюда или нажмите</div>
+<!-- ══ Top Header Bar ══════════════════════════════════════ -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">🌐</div>
+    <span class="logo-text">360Cleaner</span>
+    <span class="logo-badge">No AI</span>
+  </div>
+
+  <div class="header-sep"></div>
+
+  <div class="drop-row">
+    <!-- Drop Card 1 -->
+    <div class="drop-card" id="dz1"
+         onclick="sendToRust('pick_file_1')"
+         ondragover="onDragOver(event,'dz1')"
+         ondragleave="onDragLeave('dz1')"
+         ondrop="onDrop(event)">
+      <div class="drop-thumb" id="thumb1">
+        <span class="placeholder-icon">📷</span>
+      </div>
+      <div class="drop-info">
+        <div class="drop-label">Фото 1 · Позиция A</div>
+        <div class="drop-name" id="f1name">Перетащите или нажмите для выбора</div>
+      </div>
+      <div class="drop-action">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Загрузить
       </div>
     </div>
-    <div class="dropzone" id="dz2" onclick="sendToRust('pick_file_2')">
-      <div class="icon">📷</div>
-      <div class="info">
-        <div class="title">Фото 2 (Человек на позиции B)</div>
-        <div class="desc" id="f2_name">Перетащите файл сюда или нажмите</div>
+
+    <!-- Drop Card 2 -->
+    <div class="drop-card" id="dz2"
+         onclick="sendToRust('pick_file_2')"
+         ondragover="onDragOver(event,'dz2')"
+         ondragleave="onDragLeave('dz2')"
+         ondrop="onDrop(event)">
+      <div class="drop-thumb" id="thumb2">
+        <span class="placeholder-icon">📷</span>
+      </div>
+      <div class="drop-info">
+        <div class="drop-label">Фото 2 · Позиция B</div>
+        <div class="drop-name" id="f2name">Перетащите или нажмите для выбора</div>
+      </div>
+      <div class="drop-action">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Загрузить
       </div>
     </div>
   </div>
+</div>
 
-  <!-- Controls Panel -->
-  <div class="controls-bar">
-    <div class="sliders-group">
-      <div class="slider-item">
-        <label>Чувствительность (Порог):</label>
-        <input type="range" id="threshold" min="5" max="60" value="24" oninput="updateSliderVal('threshold', 'val_th'); triggerCompute();">
-        <span class="val" id="val_th">24</span>
+<!-- ══ Main Area ═══════════════════════════════════════════ -->
+<div class="app-body">
+
+  <!-- Left Sidebar -->
+  <div class="sidebar">
+
+    <!-- Processing params -->
+    <div class="sidebar-section">
+      <div class="section-label">Параметры обнаружения</div>
+
+      <div class="slider-block">
+        <div class="slider-row">
+          <span class="slider-name">Чувствительность</span>
+          <span class="slider-val" id="v_th">24</span>
+        </div>
+        <input type="range" id="threshold" min="5" max="60" value="24"
+               oninput="syncSlider('threshold','v_th','');triggerCompute();">
       </div>
-      <div class="slider-item">
-        <label>Захват силуэта и тени:</label>
-        <input type="range" id="dilate" min="5" max="60" value="25" oninput="updateSliderVal('dilate', 'val_dil'); triggerCompute();">
-        <span class="val" id="val_dil">25 px</span>
+
+      <div class="slider-block">
+        <div class="slider-row">
+          <span class="slider-name">Захват силуэта</span>
+          <span class="slider-val" id="v_dil">25 px</span>
+        </div>
+        <input type="range" id="dilate" min="5" max="60" value="25"
+               oninput="syncSlider('dilate','v_dil',' px');triggerCompute();">
       </div>
-      <div class="slider-item">
-        <label>Сглаживание шва (Feather):</label>
-        <input type="range" id="feather" min="2" max="50" value="20" oninput="updateSliderVal('feather', 'val_fea'); triggerCompute();">
-        <span class="val" id="val_fea">20 px</span>
+
+      <div class="slider-block">
+        <div class="slider-row">
+          <span class="slider-name">Смягчение шва</span>
+          <span class="slider-val" id="v_fea">20 px</span>
+        </div>
+        <input type="range" id="feather" min="2" max="50" value="20"
+               oninput="syncSlider('feather','v_fea',' px');triggerCompute();">
       </div>
     </div>
 
-    <div class="buttons-group">
-      <!-- Mode Toggle Button: Flat Photo <-> 360 Viewer -->
-      <button class="btn btn-mode-toggle" id="btnToggle360" onclick="toggleViewerMode()">
-        🌐 360 Просмотр
-      </button>
+    <div class="divider"></div>
 
-      <button class="btn btn-swap" onclick="toggleSwap()">
-        🔄 Поменять местами человека
+    <!-- Actions -->
+    <div class="sidebar-section">
+      <div class="section-label">Действия</div>
+      <button class="btn btn-violet" onclick="toggleSwap()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17,1 21,5 17,9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7,23 3,19 7,15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Поменять зоны
       </button>
-
-      <button class="btn btn-save" onclick="sendToRust('save_file')">
-        💾 Сохранить 360° фото
+      <button class="btn btn-emerald" onclick="sendToRust('save_file')">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
+        Сохранить 360°
       </button>
     </div>
-  </div>
 
-  <!-- Toolbar: Tabs, Aspect Ratio, Zoom -->
-  <div class="toolbar">
-    <div class="tab-group">
-      <button class="tab-btn active" onclick="switchViewTab('result')">🎯 Результат (Без человека)</button>
-      <button class="tab-btn" onclick="switchViewTab('mask')">🎭 Карта различий</button>
-      <button class="tab-btn" onclick="switchViewTab('photo1')">📸 Фото 1</button>
-      <button class="tab-btn" onclick="switchViewTab('photo2')">📸 Фото 2</button>
-    </div>
+    <div class="divider"></div>
 
-    <div class="view-controls">
-      <!-- Aspect Ratio Selector -->
-      <span style="color:#94a3b8;">Соотношение сторон:</span>
-      <select class="aspect-select" id="aspectSelect" onchange="changeAspectRatio(this.value)">
-        <option value="2/1" selected>2:1 (360 Equirectangular)</option>
-        <option value="16/9">16:9 (Широкоформатный)</option>
-        <option value="4/3">4:3 (Классический)</option>
-        <option value="1/1">1:1 (Квадратный)</option>
-        <option value="9/16">9:16 (Вертикальный Reels/Stories)</option>
-        <option value="4/5">4:5 (Портрет Instagram)</option>
-      </select>
-
-      <!-- Zoom Controls -->
-      <div class="zoom-controls">
-        <button class="zoom-btn" onclick="changeZoom(-0.15)" title="Уменьшить">−</button>
-        <span class="zoom-val" id="zoomLevel">100%</span>
-        <button class="zoom-btn" onclick="changeZoom(0.15)" title="Увеличить">+</button>
-        <button class="btn btn-secondary" style="padding:2px 8px; font-size:10px; margin-left:4px;" onclick="resetZoom()" title="Сбросить зум">
-          ⟲ Сброс зума
+    <!-- View Tabs -->
+    <div class="sidebar-section">
+      <div class="section-label">Режим просмотра</div>
+      <div class="view-tabs" id="viewTabs">
+        <button class="tab-btn active" onclick="switchTab('result',this)">
+          <span class="tab-dot" style="background:var(--accent-emerald)"></span>
+          Результат — Без человека
+        </button>
+        <button class="tab-btn" onclick="switchTab('mask',this)">
+          <span class="tab-dot" style="background:var(--accent-blue)"></span>
+          Карта различий
+        </button>
+        <button class="tab-btn" onclick="switchTab('photo1',this)">
+          <span class="tab-dot" style="background:var(--accent-cyan)"></span>
+          Фото 1 (исходник)
+        </button>
+        <button class="tab-btn" onclick="switchTab('photo2',this)">
+          <span class="tab-dot" style="background:var(--accent-violet)"></span>
+          Фото 2 (исходник)
         </button>
       </div>
     </div>
-  </div>
 
-  <!-- Viewport Area -->
-  <div class="viewport-container" id="vpContainer">
-    <div class="aspect-frame" id="aspectFrame">
-      <!-- 2D Canvas for Flat Equirectangular View -->
-      <canvas id="flat-canvas"></canvas>
+    <div class="divider"></div>
 
-      <!-- WebGL Canvas for Interactive 360 Spherical View -->
-      <canvas id="webgl-360-canvas"></canvas>
+    <!-- Viewer Mode -->
+    <div class="sidebar-section">
+      <div class="section-label">Режим отображения</div>
+      <button class="btn btn-toggle-360" id="btn360" onclick="toggle360()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><ellipse cx="12" cy="12" rx="4" ry="10"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+        360° Сфера
+      </button>
     </div>
 
-    <div class="empty-state" id="emptyState">
-      Загрузите две 360° фотографии со штатива.<br>
-      Человек будет автоматически убран с обоих мест без нейросетей.
+    <div class="divider"></div>
+
+    <!-- Viewport Options -->
+    <div class="sidebar-section">
+      <div class="section-label">Кадрирование</div>
+      <div class="select-wrapper">
+        <select class="aspect-select" id="aspectSelect" onchange="updateAspectFrame()">
+          <option value="2/1" selected>2 : 1 — Equirectangular</option>
+          <option value="16/9">16 : 9 — Широкоформатный</option>
+          <option value="4/3">4 : 3 — Классический</option>
+          <option value="1/1">1 : 1 — Квадрат</option>
+          <option value="9/16">9 : 16 — Stories / Reels</option>
+          <option value="4/5">4 : 5 — Instagram Portrait</option>
+        </select>
+        <span class="select-arrow">▾</span>
+      </div>
     </div>
 
-    <div class="loading-overlay" id="loadingOverlay">
-      <div class="spinner"></div>
-      <div id="loadingText" style="font-size:14px; color:#38bdf8; font-weight:600;">Обработка...</div>
+    <div class="sidebar-section">
+      <div class="section-label">Масштаб</div>
+      <div class="zoom-row">
+        <button class="zoom-btn" onclick="changeZoom(-0.15)">−</button>
+        <div class="zoom-display" id="zoomVal">100%</div>
+        <button class="zoom-btn" onclick="changeZoom(+0.15)">+</button>
+        <button class="zoom-reset" onclick="resetZoom()" title="Сбросить">↺</button>
+      </div>
     </div>
-  </div>
 
-  <!-- Status Bar -->
-  <div class="status-bar">
-    <span id="statusMsg">Готов к работе. Перетащите фотографии в верхние слоты.</span>
-    <span id="anglesInfo" style="color:#38bdf8;"></span>
-  </div>
+  </div><!-- /sidebar -->
+
+  <!-- ══ Viewport ══════════════════════════════════════════ -->
+  <div class="viewport">
+    <div class="canvas-area" id="canvasArea">
+
+      <div class="aspect-frame" id="aspectFrame">
+        <canvas id="flat-canvas"></canvas>
+        <canvas id="webgl-360-canvas"></canvas>
+        <div class="loading-overlay" id="loadingOverlay">
+          <div class="loading-ring"></div>
+          <span class="loading-label" id="loadingLabel">Обработка…</span>
+        </div>
+      </div>
+
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">🌐</div>
+        <div class="empty-title">Загрузите два 360° кадра</div>
+        <div class="empty-desc">Перетащите фотографии в поля сверху или нажмите на них. Поддерживается одновременное перетаскивание двух фото.</div>
+      </div>
+
+    </div><!-- /canvas-area -->
+
+    <!-- Status Bar -->
+    <div class="statusbar">
+      <div class="status-left">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusMsg">Готов. Загрузите две 360° фотографии.</span>
+      </div>
+      <div class="status-right" id="anglesInfo"></div>
+    </div>
+  </div><!-- /viewport -->
+
+</div><!-- /app-body -->
 
 <script>
-// State
-let is360Mode = false;
+// ════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════
 let currentTab = 'result';
 let currentSwap = false;
+let is360Mode = false;
 let currentZoom = 1.0;
-let fov360 = 75.0; // Degrees FOV in 360 mode
-let yaw = 0.0, pitch = 0.0;
-let isDragging = false;
-let lastMouseX = 0, lastMouseY = 0;
+let fov360 = 75.0;
+let yaw = 0, pitch = 0;
 let flatPanX = 0, flatPanY = 0;
+let isDragging = false, lastMX = 0, lastMY = 0;
 
-let images = {
-  result: null,
-  mask: null,
-  photo1: null,
-  photo2: null
-};
+let images = { result: null, mask: null, photo1: null, photo2: null };
 
-// WebGL Context and Resources
-let gl = null;
-let glProgram = null;
-let glTex = null;
-let uAspect, uYaw, uPitch, uFov, uTex;
-
+// ════════════════════════════════════════════════════════════
+// IPC with Rust
+// ════════════════════════════════════════════════════════════
 function sendToRust(action, data = {}) {
   const payload = JSON.stringify({ action, ...data });
-  if (window.ipc) {
-    window.ipc.postMessage(payload);
-  } else if (window.__TAURI_INTERNALS__) {
-    // compatibility
-  } else {
-    console.log("IPC message:", payload);
-  }
+  if (window.ipc) window.ipc.postMessage(payload);
 }
 
-// IPC receiver called by Rust
 window.onRustMessage = function(msg) {
-  if (msg.type === 'file_loaded') {
-    if (msg.slot === 1) {
-      document.getElementById('f1_name').innerText = msg.name;
-      document.getElementById('dz1').classList.add('loaded');
-    } else {
-      document.getElementById('f2_name').innerText = msg.name;
-      document.getElementById('dz2').classList.add('loaded');
-    }
-  } else if (msg.type === 'processing_started') {
-    document.getElementById('loadingOverlay').style.display = 'flex';
-    document.getElementById('loadingText').innerText = msg.text || 'Обработка 360 панорамы...';
-  } else if (msg.type === 'preview_ready') {
-    document.getElementById('loadingOverlay').style.display = 'none';
-    document.getElementById('emptyState').style.display = 'none';
+  switch(msg.type) {
+    case 'loading_file':
+      setStatus(msg.text, 'busy');
+      break;
 
-    // Load images
-    const loadImg = (b64) => {
-      if (!b64) return null;
-      const img = new Image();
-      img.src = "data:image/jpeg;base64," + b64;
-      return img;
-    };
+    case 'file_loaded': {
+      const slot = msg.slot;
+      const card = document.getElementById(slot === 1 ? 'dz1' : 'dz2');
+      const nameEl = document.getElementById(slot === 1 ? 'f1name' : 'f2name');
+      const thumb = document.getElementById(slot === 1 ? 'thumb1' : 'thumb2');
 
-    images.result = loadImg(msg.result_b64);
-    images.mask = loadImg(msg.mask_b64);
-    if (msg.p1_b64) images.photo1 = loadImg(msg.p1_b64);
-    if (msg.p2_b64) images.photo2 = loadImg(msg.p2_b64);
+      card.classList.add('loaded');
+      nameEl.textContent = msg.name;
 
-    if (msg.angle_a !== undefined && msg.angle_b !== undefined) {
-      document.getElementById('anglesInfo').innerText =
-        `Обнаружен человек: Зона A=${msg.angle_a.toFixed(0)}°, Зона B=${msg.angle_b.toFixed(0)}°`;
+      // Show photo thumbnail in drop zone
+      thumb.innerHTML = `<img src="data:image/jpeg;base64,${msg.thumb_b64}" alt="">`;
+      setStatus('Загружено: ' + msg.name, 'ready');
+      break;
     }
 
-    document.getElementById('statusMsg').innerText = "Готово! Человек успешно удален с обеих зон.";
+    case 'processing_started':
+      showLoading(true, msg.text);
+      setStatus(msg.text, 'busy');
+      break;
 
-    // Trigger render when image loads
-    if (images.result) {
-      images.result.onload = () => renderCurrent();
-    }
-  } else if (msg.type === 'save_success') {
-    document.getElementById('loadingOverlay').style.display = 'none';
-    alert("Готово!\nЧистая 360° панорама сохранена:\n" + msg.path + "\n\nМетаданные 360 Photosphere сохранены.");
-  } else if (msg.type === 'error') {
-    document.getElementById('loadingOverlay').style.display = 'none';
-    alert("Ошибка: " + msg.message);
+    case 'preview_ready':
+      showLoading(false);
+      document.getElementById('emptyState').style.display = 'none';
+
+      loadImgB64('result', msg.result_b64);
+      loadImgB64('mask',   msg.mask_b64);
+      loadImgB64('photo1', msg.p1_b64);
+      loadImgB64('photo2', msg.p2_b64);
+
+      if (msg.angle_a != null)
+        document.getElementById('anglesInfo').textContent =
+          `Зона A: ${msg.angle_a.toFixed(0)}°  ·  Зона B: ${msg.angle_b.toFixed(0)}°`;
+
+      setStatus('Готово — человек удалён с обеих зон.', 'ready');
+      break;
+
+    case 'save_success':
+      showLoading(false);
+      setStatus('Сохранено: ' + msg.path.split('/').pop(), 'ready');
+      alert('✅ Панорама сохранена!\n' + msg.path);
+      break;
+
+    case 'error':
+      showLoading(false);
+      setStatus('Ошибка: ' + msg.message, '');
+      alert('⚠️ ' + msg.message);
+      break;
   }
 };
 
-function updateSliderVal(id, labelId) {
-  const v = document.getElementById(id).value;
-  document.getElementById(labelId).innerText = (id === 'threshold') ? v : (v + ' px');
+function loadImgB64(key, b64) {
+  const img = new Image();
+  img.onload = () => {
+    images[key] = img;
+    if (key === 'result') renderCurrent();
+  };
+  img.src = 'data:image/jpeg;base64,' + b64;
 }
 
-let computeTimeout = null;
+// ════════════════════════════════════════════════════════════
+// Drag & Drop (HTML-side — handled by Rust with_drag_drop_handler)
+// These handlers are for VISUAL feedback only within the WebView
+// ════════════════════════════════════════════════════════════
+function onDragOver(e, dzId) {
+  e.preventDefault();
+  document.getElementById(dzId).classList.add('dragover');
+}
+function onDragLeave(dzId) {
+  document.getElementById(dzId).classList.remove('dragover');
+}
+function onDrop(e) {
+  e.preventDefault();
+  document.getElementById('dz1').classList.remove('dragover');
+  document.getElementById('dz2').classList.remove('dragover');
+  // Actual file handling goes via Rust's with_drag_drop_handler → UserEvent::FilesDropped
+}
+
+// ════════════════════════════════════════════════════════════
+// Controls
+// ════════════════════════════════════════════════════════════
+function syncSlider(id, labelId, suffix) {
+  document.getElementById(labelId).textContent = document.getElementById(id).value + suffix;
+}
+
+let computeTimer = null;
 function triggerCompute() {
-  clearTimeout(computeTimeout);
-  computeTimeout = setTimeout(() => {
+  clearTimeout(computeTimer);
+  computeTimer = setTimeout(() => {
     sendToRust('compute', {
-      threshold: parseInt(document.getElementById('threshold').value),
-      dilate: parseInt(document.getElementById('dilate').value),
-      feather: parseInt(document.getElementById('feather').value),
-      swap: currentSwap
+      threshold: +document.getElementById('threshold').value,
+      dilate:    +document.getElementById('dilate').value,
+      feather:   +document.getElementById('feather').value,
+      swap:      currentSwap,
     });
-  }, 100);
+  }, 120);
 }
 
 function toggleSwap() {
   currentSwap = !currentSwap;
-  document.getElementById('statusMsg').innerText = `Инвертировано назначение зон (Swap = ${currentSwap})`;
+  setStatus('Зоны инвертированы (Swap = ' + currentSwap + ')', 'busy');
   triggerCompute();
 }
 
-function switchViewTab(tab) {
+function switchTab(tab, btn) {
   currentTab = tab;
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  if (event) event.target.classList.add('active');
+  btn.classList.add('active');
   renderCurrent();
 }
 
-// ---------------------------------------------------------------------------
-// VIEW MODE TOGGLE (Flat 2D <-> 360 Sphere)
-// ---------------------------------------------------------------------------
-function toggleViewerMode() {
+// ════════════════════════════════════════════════════════════
+// 360 Toggle
+// ════════════════════════════════════════════════════════════
+function toggle360() {
   is360Mode = !is360Mode;
-  const btn = document.getElementById('btnToggle360');
-  const flatC = document.getElementById('flat-canvas');
-  const webglC = document.getElementById('webgl-360-canvas');
+  const btn = document.getElementById('btn360');
+  const flat = document.getElementById('flat-canvas');
+  const wgl  = document.getElementById('webgl-360-canvas');
 
   if (is360Mode) {
-    btn.innerHTML = '🖼 Обычный просмотр';
-    btn.style.background = '#8b5cf6';
-    flatC.style.display = 'none';
-    webglC.style.display = 'block';
+    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg> Плоский вид`;
+    btn.classList.add('active-360');
+    flat.style.display = 'none';
+    wgl.style.display  = 'block';
     initWebGLIfNeeded();
   } else {
-    btn.innerHTML = '🌐 360 Просмотр';
-    btn.style.background = '#0284c7';
-    flatC.style.display = 'block';
-    webglC.style.display = 'none';
+    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><ellipse cx="12" cy="12" rx="4" ry="10"/><line x1="2" y1="12" x2="22" y2="12"/></svg> 360° Сфера`;
+    btn.classList.remove('active-360');
+    flat.style.display = 'block';
+    wgl.style.display  = 'none';
   }
   updateAspectFrame();
   renderCurrent();
 }
 
-function changeAspectRatio(ratioStr) {
-  updateAspectFrame();
-  renderCurrent();
-}
-
+// ════════════════════════════════════════════════════════════
+// Aspect Frame & Zoom
+// ════════════════════════════════════════════════════════════
 function updateAspectFrame() {
+  const area  = document.getElementById('canvasArea');
   const frame = document.getElementById('aspectFrame');
-  const vp = document.getElementById('vpContainer');
   const parts = document.getElementById('aspectSelect').value.split('/');
-  const targetRatio = parseFloat(parts[0]) / parseFloat(parts[1]);
+  const ratio = parseFloat(parts[0]) / parseFloat(parts[1]);
 
-  const maxW = vp.clientWidth - 16;
-  const maxH = vp.clientHeight - 16;
+  const maxW = area.clientWidth  - 32;
+  const maxH = area.clientHeight - 32;
+  let w = maxW, h = w / ratio;
+  if (h > maxH) { h = maxH; w = h * ratio; }
 
-  let w = maxW;
-  let h = w / targetRatio;
-  if (h > maxH) {
-    h = maxH;
-    w = h * targetRatio;
-  }
+  w = Math.round(w);
+  h = Math.round(h);
+  frame.style.width  = w + 'px';
+  frame.style.height = h + 'px';
 
-  frame.style.width = Math.round(w) + 'px';
-  frame.style.height = Math.round(h) + 'px';
+  const dpr = window.devicePixelRatio || 1;
+  ['flat-canvas','webgl-360-canvas'].forEach(id => {
+    const c = document.getElementById(id);
+    c.width  = w * dpr;
+    c.height = h * dpr;
+  });
 
-  // Resize canvas buffers
-  const flatC = document.getElementById('flat-canvas');
-  const webglC = document.getElementById('webgl-360-canvas');
-  flatC.width = Math.round(w * window.devicePixelRatio);
-  flatC.height = Math.round(h * window.devicePixelRatio);
-  webglC.width = Math.round(w * window.devicePixelRatio);
-  webglC.height = Math.round(h * window.devicePixelRatio);
-
-  if (gl) gl.viewport(0, 0, webglC.width, webglC.height);
+  if (gl) gl.viewport(0, 0, w * dpr, h * dpr);
+  renderCurrent();
 }
 
-// ---------------------------------------------------------------------------
-// ZOOM & RESET ZOOM
-// ---------------------------------------------------------------------------
 function changeZoom(delta) {
   if (is360Mode) {
-    // Zoom in = decrease FOV (closer), Zoom out = increase FOV (wider)
-    fov360 = Math.max(25.0, Math.min(120.0, fov360 - delta * 45.0));
-    document.getElementById('zoomLevel').innerText = Math.round((75.0 / fov360) * 100) + '%';
+    fov360 = Math.max(20, Math.min(130, fov360 - delta * 55));
+    document.getElementById('zoomVal').textContent = Math.round(75 / fov360 * 100) + '%';
   } else {
-    currentZoom = Math.max(0.25, Math.min(6.0, currentZoom + delta));
-    document.getElementById('zoomLevel').innerText = Math.round(currentZoom * 100) + '%';
+    currentZoom = Math.max(0.2, Math.min(8, currentZoom + delta));
+    document.getElementById('zoomVal').textContent = Math.round(currentZoom * 100) + '%';
   }
   renderCurrent();
 }
 
 function resetZoom() {
-  currentZoom = 1.0;
-  fov360 = 75.0;
-  flatPanX = 0;
-  flatPanY = 0;
-  yaw = 0.0;
-  pitch = 0.0;
-  document.getElementById('zoomLevel').innerText = '100%';
+  currentZoom = 1; fov360 = 75;
+  flatPanX = 0; flatPanY = 0;
+  yaw = 0; pitch = 0;
+  document.getElementById('zoomVal').textContent = '100%';
   renderCurrent();
 }
 
-// ---------------------------------------------------------------------------
-// RENDERING PIPELINE
-// ---------------------------------------------------------------------------
-function getActiveImage() {
-  return images[currentTab] || images.result;
-}
+// ════════════════════════════════════════════════════════════
+// RENDERING
+// ════════════════════════════════════════════════════════════
+function getActiveImage() { return images[currentTab] || null; }
 
 function renderCurrent() {
   const img = getActiveImage();
   if (!img || !img.complete || img.naturalWidth === 0) return;
-
-  if (is360Mode) {
-    render360WebGL(img);
-  } else {
-    renderFlatCanvas(img);
-  }
+  if (is360Mode) render360(img); else renderFlat(img);
 }
 
-// Render 2D Flat Equirectangular image
-function renderFlatCanvas(img) {
+function renderFlat(img) {
   const canvas = document.getElementById('flat-canvas');
   const ctx = canvas.getContext('2d');
-  const cw = canvas.width;
-  const ch = canvas.height;
-
+  const cw = canvas.width, ch = canvas.height;
   ctx.clearRect(0, 0, cw, ch);
-  ctx.save();
 
-  // Aspect-fit image
-  const imgRatio = img.naturalWidth / img.naturalHeight;
-  const canRatio = cw / ch;
-
+  const ir = img.naturalWidth / img.naturalHeight;
+  const cr = cw / ch;
   let dw, dh;
-  if (canRatio > imgRatio) {
-    dh = ch;
-    dw = dh * imgRatio;
-  } else {
-    dw = cw;
-    dh = dw / imgRatio;
-  }
+  if (cr > ir) { dh = ch; dw = dh * ir; } else { dw = cw; dh = dw / ir; }
 
-  const cx = cw / 2 + flatPanX;
-  const cy = ch / 2 + flatPanY;
-
-  ctx.translate(cx, cy);
+  ctx.save();
+  ctx.translate(cw / 2 + flatPanX, ch / 2 + flatPanY);
   ctx.scale(currentZoom, currentZoom);
   ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
   ctx.restore();
 }
 
-// ---------------------------------------------------------------------------
-// HARDWARE-ACCELERATED 360 WEBGL SPHERICAL SHADER (Pure offline, 0 CDN)
-// ---------------------------------------------------------------------------
-const VS_SRC = `
-  attribute vec2 a_pos;
-  varying vec2 v_uv;
-  void main() {
-    v_uv = a_pos;
-    gl_Position = vec4(a_pos, 0.0, 1.0);
-  }
-`;
+// ── WebGL 360 Sphere ──────────────────────────────────────
+let gl = null, glProg = null, glTex = null;
+let uAspect, uYaw, uPitch, uFov, uTex;
 
-const FS_SRC = `
-  precision mediump float;
-  varying vec2 v_uv;
-  uniform sampler2D u_tex;
-  uniform float u_aspect;
-  uniform float u_yaw;
-  uniform float u_pitch;
-  uniform float u_fov;
-
-  #define PI 3.141592653589793
-
-  void main() {
-    float halfFov = u_fov * 0.5;
-    float tanHalf = tan(halfFov);
-
-    // Camera ray in eye coordinates
-    float x = v_uv.x * u_aspect * tanHalf;
-    float y = v_uv.y * tanHalf;
-    float z = 1.0;
-    vec3 ray = normalize(vec3(x, y, z));
-
-    // Rotate pitch (X-axis)
-    float cp = cos(u_pitch);
-    float sp = sin(u_pitch);
-    vec3 r1 = vec3(ray.x, ray.y * cp - ray.z * sp, ray.y * sp + ray.z * cp);
-
-    // Rotate yaw (Y-axis)
-    float cy = cos(u_yaw);
-    float sy = sin(u_yaw);
-    vec3 r2 = vec3(r1.x * cy + r1.z * sy, r1.y, -r1.x * sy + r1.z * cy);
-
-    // Map 3D unit ray to spherical equirectangular coordinates
-    float lon = atan(r2.x, r2.z); // [-PI, PI]
-    float lat = asin(clamp(r2.y, -1.0, 1.0)); // [-PI/2, PI/2]
-
-    float u = lon / (2.0 * PI) + 0.5;
-    float v = 0.5 - lat / PI;
-
-    gl_FragColor = texture2D(u_tex, vec2(fract(u), clamp(v, 0.0, 1.0)));
-  }
-`;
+const VS = `attribute vec2 a;varying vec2 v;void main(){v=a;gl_Position=vec4(a,0,1);}`;
+const FS = `precision mediump float;
+varying vec2 v; uniform sampler2D u; uniform float asp,yw,pt,fv;
+#define PI 3.141592653589793
+void main(){
+  float h=tan(fv*.5);
+  vec3 r=normalize(vec3(v.x*asp*h,v.y*h,1));
+  float cp=cos(pt),sp=sin(pt);
+  vec3 r1=vec3(r.x,r.y*cp-r.z*sp,r.y*sp+r.z*cp);
+  float cy=cos(yw),sy=sin(yw);
+  vec3 r2=vec3(r1.x*cy+r1.z*sy,r1.y,-r1.x*sy+r1.z*cy);
+  float lon=atan(r2.x,r2.z),lat=asin(clamp(r2.y,-1.,1.));
+  gl_FragColor=texture2D(u,vec2(fract(lon/(2.*PI)+.5),.5-lat/PI));
+}`;
 
 function initWebGLIfNeeded() {
   if (gl) return;
-  const canvas = document.getElementById('webgl-360-canvas');
-  gl = canvas.getContext('webgl', { alpha: false, antialias: true });
+  const c = document.getElementById('webgl-360-canvas');
+  gl = c.getContext('webgl',{alpha:false,antialias:true});
   if (!gl) return;
 
-  function compileShader(type, src) {
+  function shader(type, src) {
     const s = gl.createShader(type);
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    return s;
+    gl.shaderSource(s, src); gl.compileShader(s); return s;
   }
+  glProg = gl.createProgram();
+  gl.attachShader(glProg, shader(gl.VERTEX_SHADER, VS));
+  gl.attachShader(glProg, shader(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(glProg); gl.useProgram(glProg);
 
-  const vs = compileShader(gl.VERTEX_SHADER, VS_SRC);
-  const fs = compileShader(gl.FRAGMENT_SHADER, FS_SRC);
-  glProgram = gl.createProgram();
-  gl.attachShader(glProgram, vs);
-  gl.attachShader(glProgram, fs);
-  gl.linkProgram(glProgram);
-  gl.useProgram(glProgram);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+  const a = gl.getAttribLocation(glProg, 'a');
+  gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
 
-  // Full-screen quad buffer
-  const quadBuf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-    -1, -1,  1, -1, -1,  1,
-    -1,  1,  1, -1,  1,  1
-  ]), gl.STATIC_DRAW);
+  uAspect=gl.getUniformLocation(glProg,'asp');
+  uYaw  =gl.getUniformLocation(glProg,'yw');
+  uPitch=gl.getUniformLocation(glProg,'pt');
+  uFov  =gl.getUniformLocation(glProg,'fv');
+  uTex  =gl.getUniformLocation(glProg,'u');
 
-  const aPos = gl.getAttribLocation(glProgram, 'a_pos');
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-
-  uAspect = gl.getUniformLocation(glProgram, 'u_aspect');
-  uYaw = gl.getUniformLocation(glProgram, 'u_yaw');
-  uPitch = gl.getUniformLocation(glProgram, 'u_pitch');
-  uFov = gl.getUniformLocation(glProgram, 'u_fov');
-  uTex = gl.getUniformLocation(glProgram, 'u_tex');
-
-  glTex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, glTex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  glTex=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,glTex);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
 }
 
-function render360WebGL(img) {
+function render360(img) {
   initWebGLIfNeeded();
-  if (!gl || !glProgram) return;
-
-  const canvas = document.getElementById('webgl-360-canvas');
-  gl.useProgram(glProgram);
-
-  // Upload texture
-  gl.bindTexture(gl.TEXTURE_2D, glTex);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-
-  const aspect = canvas.width / canvas.height;
-  const fovRad = (fov360 * Math.PI) / 180.0;
-
-  gl.uniform1f(uAspect, aspect);
-  gl.uniform1f(uYaw, yaw);
+  if (!gl) return;
+  const c = document.getElementById('webgl-360-canvas');
+  gl.useProgram(glProg);
+  gl.bindTexture(gl.TEXTURE_2D,glTex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img);
+  gl.uniform1f(uAspect, c.width/c.height);
+  gl.uniform1f(uYaw,   yaw);
   gl.uniform1f(uPitch, pitch);
-  gl.uniform1f(uFov, fovRad);
-  gl.uniform1i(uTex, 0);
-
-  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  gl.uniform1f(uFov,   fov360*Math.PI/180);
+  gl.uniform1i(uTex,   0);
+  gl.drawArrays(gl.TRIANGLES,0,6);
 }
 
-// ---------------------------------------------------------------------------
-// MOUSE INTERACTION (Pan in 2D, Rotate in 360, Wheel to Zoom)
-// ---------------------------------------------------------------------------
-const vpBox = document.getElementById('aspectFrame');
-
-vpBox.addEventListener('mousedown', (e) => {
-  isDragging = true;
-  lastMouseX = e.clientX;
-  lastMouseY = e.clientY;
-});
-
-window.addEventListener('mouseup', () => { isDragging = false; });
-
-window.addEventListener('mousemove', (e) => {
+// ── Mouse interaction ─────────────────────────────────────
+const frame = document.getElementById('aspectFrame');
+frame.addEventListener('mousedown', e => { isDragging=true; lastMX=e.clientX; lastMY=e.clientY; });
+window.addEventListener('mouseup', () => isDragging=false);
+window.addEventListener('mousemove', e => {
   if (!isDragging) return;
-  const dx = e.clientX - lastMouseX;
-  const dy = e.clientY - lastMouseY;
-  lastMouseX = e.clientX;
-  lastMouseY = e.clientY;
-
+  const dx=e.clientX-lastMX, dy=e.clientY-lastMY;
+  lastMX=e.clientX; lastMY=e.clientY;
   if (is360Mode) {
-    // 360 Sphere Rotation
-    const sens = (fov360 / 75.0) * 0.0035;
-    yaw -= dx * sens;
-    pitch -= dy * sens;
-    // Clamp pitch between [-85°, +85°]
-    pitch = Math.max(-1.48, Math.min(1.48, pitch));
+    const s=(fov360/75)*0.004;
+    yaw-=dx*s; pitch=Math.max(-1.48,Math.min(1.48,pitch-dy*s));
   } else {
-    // 2D Flat Pan
-    flatPanX += dx * (window.devicePixelRatio || 1);
-    flatPanY += dy * (window.devicePixelRatio || 1);
+    const dpr=window.devicePixelRatio||1;
+    flatPanX+=dx*dpr; flatPanY+=dy*dpr;
   }
   renderCurrent();
 });
-
-vpBox.addEventListener('wheel', (e) => {
+frame.addEventListener('wheel', e => {
   e.preventDefault();
-  const delta = e.deltaY < 0 ? 0.1 : -0.1;
-  changeZoom(delta);
-}, { passive: false });
+  changeZoom(e.deltaY<0?0.1:-0.1);
+},{passive:false});
 
-window.addEventListener('resize', () => {
-  updateAspectFrame();
-  renderCurrent();
-});
+// ── Resize ───────────────────────────────────────────────
+window.addEventListener('resize', () => { updateAspectFrame(); });
 
-// Initial Setup
-updateAspectFrame();
+// ── Status helpers ────────────────────────────────────────
+function setStatus(text, state) {
+  document.getElementById('statusMsg').textContent = text;
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot' + (state ? ' ' + state : '');
+}
+
+function showLoading(show, text) {
+  const ov = document.getElementById('loadingOverlay');
+  ov.style.display = show ? 'flex' : 'none';
+  if (text) document.getElementById('loadingLabel').textContent = text;
+}
+
+// Init
+setTimeout(updateAspectFrame, 50);
 </script>
 </body>
 </html>

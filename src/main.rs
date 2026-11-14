@@ -1,5 +1,5 @@
 //! 360Cleaner — Fast, Native 360 Panorama Person Remover in Rust.
-//! Built with Tao + Wry + Rayon. Zero AI, 100% authentic computer vision.
+//! Tao + Wry + Rayon. Zero AI, 100% classical computer vision.
 
 mod processor;
 mod xmp;
@@ -13,9 +13,17 @@ use std::io::Cursor;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tao::event::{Event, WindowEvent};
-use tao::event_loop::{ControlFlow, EventLoopBuilder};
+use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tao::window::WindowBuilder;
 use wry::WebViewBuilder;
+
+/// User events routed back to the main event loop for main-thread operations.
+#[derive(Debug)]
+enum UserEvent {
+    PickFile { slot: u8 },
+    FilesDropped { paths: Vec<PathBuf> },
+    SaveFile,
+}
 
 #[derive(Default)]
 struct AppState {
@@ -44,17 +52,18 @@ struct IpcRequest {
 }
 
 #[derive(Serialize)]
-struct FileLoadedMsg<'a> {
+struct FileLoadedMsg {
     #[serde(rename = "type")]
-    msg_type: &'a str,
+    msg_type: String,
     slot: u8,
     name: String,
+    thumb_b64: String,
 }
 
 #[derive(Serialize)]
-struct PreviewReadyMsg<'a> {
+struct PreviewReadyMsg {
     #[serde(rename = "type")]
-    msg_type: &'a str,
+    msg_type: String,
     result_b64: String,
     mask_b64: String,
     p1_b64: String,
@@ -64,79 +73,105 @@ struct PreviewReadyMsg<'a> {
 }
 
 #[derive(Serialize)]
-struct StatusMsg<'a> {
+struct StatusMsg {
     #[serde(rename = "type")]
-    msg_type: &'a str,
-    text: &'a str,
+    msg_type: String,
+    text: String,
 }
 
 #[derive(Serialize)]
-struct SaveSuccessMsg<'a> {
+struct SaveSuccessMsg {
     #[serde(rename = "type")]
-    msg_type: &'a str,
+    msg_type: String,
     path: String,
 }
 
 #[derive(Serialize)]
-struct ErrorMsg<'a> {
+struct ErrorMsg {
     #[serde(rename = "type")]
-    msg_type: &'a str,
+    msg_type: String,
     message: String,
 }
 
 fn encode_rgb_to_jpeg_b64(img: &RgbImage, quality: u8) -> String {
     let mut buf = Vec::new();
-    let mut cursor = Cursor::new(&mut buf);
-    let mut enc = JpegEncoder::new_with_quality(&mut cursor, quality);
-    let _ = enc.encode(img.as_raw(), img.width(), img.height(), image::ExtendedColorType::Rgb8);
+    {
+        let mut cursor = Cursor::new(&mut buf);
+        let mut enc = JpegEncoder::new_with_quality(&mut cursor, quality);
+        let _ = enc.encode(
+            img.as_raw(),
+            img.width(),
+            img.height(),
+            image::ExtendedColorType::Rgb8,
+        );
+    }
     BASE64_STANDARD.encode(&buf)
 }
 
+fn make_thumbnail(img: &RgbImage) -> String {
+    // Small 320px thumbnail for slot previews
+    let (w, h) = img.dimensions();
+    let thumb = if w > 320 || h > 180 {
+        let scale = (320.0 / w as f32).min(180.0 / h as f32);
+        let nw = (w as f32 * scale).round() as u32;
+        let nh = (h as f32 * scale).round() as u32;
+        image::imageops::resize(img, nw, nh, image::imageops::FilterType::Triangle)
+    } else {
+        img.clone()
+    };
+    encode_rgb_to_jpeg_b64(&thumb, 85)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let event_loop = EventLoopBuilder::new().build();
+    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+    let proxy: EventLoopProxy<UserEvent> = event_loop.create_proxy();
+    let proxy_for_dd = event_loop.create_proxy();
+
     let window = WindowBuilder::new()
-        .with_title("360Cleaner — Удаление человека с 360° панорам (Rust)")
-        .with_inner_size(tao::dpi::LogicalSize::new(1220.0, 840.0))
-        .with_min_inner_size(tao::dpi::LogicalSize::new(960.0, 680.0))
+        .with_title("360Cleaner")
+        .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 860.0))
+        .with_min_inner_size(tao::dpi::LogicalSize::new(1000.0, 700.0))
         .build(&event_loop)?;
 
-    let app_state = Arc::new(Mutex::new(AppState::default()));
+    let app_state: Arc<Mutex<AppState>> = Arc::new(Mutex::new(AppState::default()));
     let state_for_ipc = Arc::clone(&app_state);
 
     let html_content = include_str!("ui/index.html");
 
     let webview = WebViewBuilder::new()
         .with_html(html_content)
+        // Intercept file drops BEFORE the WebView can open them as full-window files
+        .with_drag_drop_handler(move |event| {
+            use wry::DragDropEvent;
+            match event {
+                DragDropEvent::Drop { paths, .. } => {
+                    let _ = proxy_for_dd.send_event(UserEvent::FilesDropped {
+                        paths,
+                    });
+                    true // Prevent WebView default handling (opens file in browser)
+                }
+                _ => true, // Also block DragEnter/DragOver visual default
+            }
+        })
         .with_ipc_handler(move |msg| {
             let body = msg.body();
             let req: IpcRequest = match serde_json::from_str(body) {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("Invalid IPC payload: {}", e);
+                    eprintln!("Invalid IPC: {}", e);
                     return;
                 }
             };
-
             let state_clone = Arc::clone(&state_for_ipc);
+            let proxy_clone = proxy.clone();
 
             match req.action.as_str() {
                 "pick_file_1" => {
-                    if let Some(file) = rfd::FileDialog::new()
-                        .set_title("Выберите первое 360° фото")
-                        .add_filter("360 Images", &["jpg", "jpeg", "png", "tif", "tiff"])
-                        .pick_file()
-                    {
-                        handle_load_file(1, file, state_clone);
-                    }
+                    // Must open dialog on main thread on macOS — route via EventLoop proxy
+                    let _ = proxy_clone.send_event(UserEvent::PickFile { slot: 1 });
                 }
                 "pick_file_2" => {
-                    if let Some(file) = rfd::FileDialog::new()
-                        .set_title("Выберите второе 360° фото")
-                        .add_filter("360 Images", &["jpg", "jpeg", "png", "tif", "tiff"])
-                        .pick_file()
-                    {
-                        handle_load_file(2, file, state_clone);
-                    }
+                    let _ = proxy_clone.send_event(UserEvent::PickFile { slot: 2 });
                 }
                 "compute" => {
                     let thresh = req.threshold.unwrap_or(24);
@@ -146,7 +181,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     handle_compute(thresh, dil, fea, swp, state_clone);
                 }
                 "save_file" => {
-                    handle_save_export(state_clone);
+                    let _ = proxy_clone.send_event(UserEvent::SaveFile);
                 }
                 _ => {}
             }
@@ -156,7 +191,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let webview_arc = Arc::new(webview);
     let webview_for_state = Arc::clone(&webview_arc);
 
-    // Save webview sender into global thread hook or helper
     GLOBAL_WEBVIEW.with(|gw| {
         *gw.borrow_mut() = Some(webview_for_state);
     });
@@ -167,30 +201,85 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match event {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                WindowEvent::DroppedFile(path) => {
-                    let st = app_state.lock().unwrap();
-                    if st.path1.is_none() {
-                        drop(st);
-                        handle_load_file(1, path, Arc::clone(&app_state));
-                    } else {
-                        drop(st);
-                        handle_load_file(2, path, Arc::clone(&app_state));
-                    }
-                }
                 _ => {}
             },
+
+            Event::UserEvent(user_event) => match user_event {
+                // File picker runs on main thread — works on macOS and Windows
+                UserEvent::PickFile { slot } => {
+                    let title = if slot == 1 {
+                        "Выберите первое 360° фото"
+                    } else {
+                        "Выберите второе 360° фото"
+                    };
+                    if let Some(file) = rfd::FileDialog::new()
+                        .set_title(title)
+                        .add_filter("360 Images", &["jpg", "jpeg", "png", "tif", "tiff"])
+                        .pick_file()
+                    {
+                        handle_load_file(slot, file, Arc::clone(&app_state));
+                    }
+                }
+
+                // Handle dropped files — support 1 or 2 files at once
+                UserEvent::FilesDropped { paths } => {
+                    let image_paths: Vec<PathBuf> = paths
+                        .into_iter()
+                        .filter(|p| {
+                            matches!(
+                                p.extension()
+                                    .and_then(|e| e.to_str())
+                                    .map(|e| e.to_lowercase())
+                                    .as_deref(),
+                                Some("jpg" | "jpeg" | "png" | "tif" | "tiff")
+                            )
+                        })
+                        .collect();
+
+                    if image_paths.is_empty() {
+                        return;
+                    }
+
+                    let st = app_state.lock().unwrap();
+                    let has1 = st.path1.is_some();
+                    let has2 = st.path2.is_some();
+                    drop(st);
+
+                    if image_paths.len() >= 2 {
+                        // Two photos dropped at once → slot 1 and slot 2
+                        handle_load_file(1, image_paths[0].clone(), Arc::clone(&app_state));
+                        handle_load_file(2, image_paths[1].clone(), Arc::clone(&app_state));
+                    } else {
+                        // Single photo: fill the first empty slot
+                        if !has1 {
+                            handle_load_file(1, image_paths[0].clone(), Arc::clone(&app_state));
+                        } else if !has2 {
+                            handle_load_file(2, image_paths[0].clone(), Arc::clone(&app_state));
+                        } else {
+                            // Both slots taken — replace slot 1 and re-compute
+                            handle_load_file(1, image_paths[0].clone(), Arc::clone(&app_state));
+                        }
+                    }
+                }
+
+                UserEvent::SaveFile => {
+                    handle_save_export(Arc::clone(&app_state));
+                }
+            },
+
             _ => {}
         }
     });
 }
 
 thread_local! {
-    static GLOBAL_WEBVIEW: std::cell::RefCell<Option<Arc<wry::WebView>>> = const { std::cell::RefCell::new(None) };
+    static GLOBAL_WEBVIEW: std::cell::RefCell<Option<Arc<wry::WebView>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 fn emit_to_webview<T: Serialize>(data: &T) {
     if let Ok(json_str) = serde_json::to_string(data) {
-        let script = format!("if (window.onRustMessage) window.onRustMessage({});", json_str);
+        let script = format!("if(window.onRustMessage)window.onRustMessage({});", json_str);
         GLOBAL_WEBVIEW.with(|gw| {
             if let Some(ref wv) = *gw.borrow() {
                 let _ = wv.evaluate_script(&script);
@@ -200,16 +289,22 @@ fn emit_to_webview<T: Serialize>(data: &T) {
 }
 
 fn handle_load_file(slot: u8, path: PathBuf, state_arc: Arc<Mutex<AppState>>) {
-    let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
 
     std::thread::spawn(move || {
         emit_to_webview(&StatusMsg {
-            msg_type: "processing_started",
-            text: &format!("Загрузка фото {}...", slot),
+            msg_type: "loading_file".into(),
+            text: format!("Загрузка фото {} — {}…", slot, name),
         });
 
         match processor::load_image(&path, Some(1400)) {
             Ok(preview) => {
+                let thumb_b64 = make_thumbnail(&preview);
+
                 let mut st = state_arc.lock().unwrap();
                 if slot == 1 {
                     st.path1 = Some(path);
@@ -220,9 +315,10 @@ fn handle_load_file(slot: u8, path: PathBuf, state_arc: Arc<Mutex<AppState>>) {
                 }
 
                 emit_to_webview(&FileLoadedMsg {
-                    msg_type: "file_loaded",
+                    msg_type: "file_loaded".into(),
                     slot,
                     name,
+                    thumb_b64,
                 });
 
                 let both_loaded = st.path1.is_some() && st.path2.is_some();
@@ -234,17 +330,12 @@ fn handle_load_file(slot: u8, path: PathBuf, state_arc: Arc<Mutex<AppState>>) {
 
                 if both_loaded {
                     handle_compute(thresh, dil, fea, swp, state_arc);
-                } else {
-                    emit_to_webview(&StatusMsg {
-                        msg_type: "status",
-                        text: "Загрузите второе фото для начала обработки",
-                    });
                 }
             }
             Err(e) => {
                 emit_to_webview(&ErrorMsg {
-                    msg_type: "error",
-                    message: format!("Не удалось открыть фото: {}", e),
+                    msg_type: "error".into(),
+                    message: format!("Не удалось открыть: {}", e),
                 });
             }
         }
@@ -274,11 +365,10 @@ fn handle_compute(
         };
 
         emit_to_webview(&StatusMsg {
-            msg_type: "processing_started",
-            text: "Сведение панорам и удаление человека...",
+            msg_type: "processing_started".into(),
+            text: "Анализ различий и удаление человека…".into(),
         });
 
-        // Ensure dimensions match
         if img1.dimensions() != img2.dimensions() {
             let (w, h) = img1.dimensions();
             img2 = image::imageops::resize(&img2, w, h, image::imageops::FilterType::Triangle);
@@ -286,32 +376,28 @@ fn handle_compute(
 
         let (w, h) = img1.dimensions();
         let diff_map = processor::compute_difference_map(&img1, &img2);
-        let mut binary_mask: Vec<bool> = diff_map.iter().map(|&d| d > (threshold as f32)).collect();
-
-        // Morphological dilation with circular 360 wrapping
+        let mut binary_mask: Vec<bool> =
+            diff_map.iter().map(|&d| d > (threshold as f32)).collect();
         binary_mask = processor::dilate_mask_360(&binary_mask, w, h, dilate);
 
-        // Find canonical angular cluster centers
         let angles = processor::find_cluster_angles(&binary_mask, w, h);
 
-        // Save computed angles to state so full-res export uses the exact same geometry!
         {
             let mut st = state_arc.lock().unwrap();
             st.cached_angles = Some(angles);
         }
 
-        // Blend preview
-        let clean_preview = processor::blend_panoramas(&img1, &img2, &binary_mask, angles, swap, feather);
+        let clean_preview =
+            processor::blend_panoramas(&img1, &img2, &binary_mask, angles, swap, feather);
         let mask_vis = processor::create_mask_visualization(&binary_mask, w, h, angles);
 
-        // Encode to base64 JPEG
         let result_b64 = encode_rgb_to_jpeg_b64(&clean_preview, 92);
         let mask_b64 = encode_rgb_to_jpeg_b64(&mask_vis, 90);
-        let p1_b64 = encode_rgb_to_jpeg_b64(&img1, 88);
-        let p2_b64 = encode_rgb_to_jpeg_b64(&img2, 88);
+        let p1_b64 = encode_rgb_to_jpeg_b64(&img1, 85);
+        let p2_b64 = encode_rgb_to_jpeg_b64(&img2, 85);
 
         emit_to_webview(&PreviewReadyMsg {
-            msg_type: "preview_ready",
+            msg_type: "preview_ready".into(),
             result_b64,
             mask_b64,
             p1_b64,
@@ -340,8 +426,8 @@ fn handle_save_export(state_arc: Arc<Mutex<AppState>>) {
         (Some(p1), Some(p2)) => (p1, p2),
         _ => {
             emit_to_webview(&ErrorMsg {
-                msg_type: "error",
-                message: "Сначала загрузите два 360° фото.".to_string(),
+                msg_type: "error".into(),
+                message: "Загрузите оба фото.".into(),
             });
             return;
         }
@@ -350,7 +436,7 @@ fn handle_save_export(state_arc: Arc<Mutex<AppState>>) {
     let out_file = match rfd::FileDialog::new()
         .set_title("Сохранить чистое 360° фото")
         .set_file_name("clean_360_panorama.jpg")
-        .add_filter("JPEG 360 Image", &["jpg", "jpeg"])
+        .add_filter("JPEG Image", &["jpg", "jpeg"])
         .save_file()
     {
         Some(f) => f,
@@ -359,17 +445,16 @@ fn handle_save_export(state_arc: Arc<Mutex<AppState>>) {
 
     std::thread::spawn(move || {
         emit_to_webview(&StatusMsg {
-            msg_type: "processing_started",
-            text: "Рендеринг финального 360° фото в полном разрешении...",
+            msg_type: "processing_started".into(),
+            text: "Финальный рендеринг в полном разрешении…".into(),
         });
 
-        // Load full-resolution images
         let img1 = match processor::load_image(&path1, None) {
             Ok(img) => img,
             Err(e) => {
                 emit_to_webview(&ErrorMsg {
-                    msg_type: "error",
-                    message: format!("Ошибка загрузки первого фото в полном разрешении: {}", e),
+                    msg_type: "error".into(),
+                    message: format!("Ошибка: {}", e),
                 });
                 return;
             }
@@ -379,8 +464,8 @@ fn handle_save_export(state_arc: Arc<Mutex<AppState>>) {
             Ok(img) => img,
             Err(e) => {
                 emit_to_webview(&ErrorMsg {
-                    msg_type: "error",
-                    message: format!("Ошибка загрузки второго фото в полном разрешении: {}", e),
+                    msg_type: "error".into(),
+                    message: format!("Ошибка: {}", e),
                 });
                 return;
             }
@@ -392,41 +477,35 @@ fn handle_save_export(state_arc: Arc<Mutex<AppState>>) {
         }
 
         let (w, h) = img1.dimensions();
-
-        // Scale dilate and feather proportionally to resolution (base preview width: 1400)
         let scale = (w as f32 / 1400.0).max(1.0);
         let dil_scaled = ((dil as f32) * scale).round() as i32;
         let fea_scaled = ((fea as f32) * scale).round() as i32;
 
         let diff_map = processor::compute_difference_map(&img1, &img2);
-        let mut binary_mask: Vec<bool> = diff_map.iter().map(|&d| d > (thresh as f32)).collect();
+        let mut binary_mask: Vec<bool> =
+            diff_map.iter().map(|&d| d > (thresh as f32)).collect();
         binary_mask = processor::dilate_mask_360(&binary_mask, w, h, dil_scaled);
 
-        // CRITICAL BUG FIX:
-        // Use the EXACT SAME cluster angles that produced the clean preview!
-        // Because angles are in spherical coordinates [0, 2*PI), assigning pixels
-        // by angular distance is 100% resolution invariant.
-        let angles = angles_opt.unwrap_or_else(|| processor::find_cluster_angles(&binary_mask, w, h));
+        let angles =
+            angles_opt.unwrap_or_else(|| processor::find_cluster_angles(&binary_mask, w, h));
 
-        // Blend full-resolution image
-        let clean_full = processor::blend_panoramas(&img1, &img2, &binary_mask, angles, swap, fea_scaled);
+        let clean_full =
+            processor::blend_panoramas(&img1, &img2, &binary_mask, angles, swap, fea_scaled);
 
-        // Save JPEG
         if let Err(e) = clean_full.save(&out_file) {
             emit_to_webview(&ErrorMsg {
-                msg_type: "error",
-                message: format!("Не удалось сохранить файл: {}", e),
+                msg_type: "error".into(),
+                message: format!("Не удалось сохранить: {}", e),
             });
             return;
         }
 
-        // Copy and inject 360 Google Photosphere / GPano XMP & EXIF metadata
         if let Ok(markers) = xmp::extract_jpeg_markers(&path1) {
             let _ = xmp::inject_markers_to_jpeg(&out_file, &markers);
         }
 
         emit_to_webview(&SaveSuccessMsg {
-            msg_type: "save_success",
+            msg_type: "save_success".into(),
             path: out_file.to_string_lossy().to_string(),
         });
     });
