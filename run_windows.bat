@@ -1,33 +1,19 @@
 @echo off
 chcp 65001 >nul
-title 360Cleaner - Удаление человека с 360 фото (Windows)
-
-echo ==========================================================
-echo    360Cleaner — Удаление человека с 360° фото (Windows)
-echo ==========================================================
-
 cd /d "%~dp0"
+title 360Cleaner - Rust 360 Person Remover
 
-where python >nul 2>nul
-if %errorlevel% neq 0 (
-    echo [ОШИБКА] Python не найден в системе!
-    echo Установите Python с официального сайта: https://www.python.org
-    echo Обязательно отметьте галочку "Add Python to PATH" при установке.
-    pause
-    exit /b 1
+if exist "target\release\cleaner360.exe" (
+    start "" "target\release\cleaner360.exe"
+    exit /b 0
 )
 
-if not exist "venv" (
-    echo Создание виртуального окружения (venv)...
-    python -m venv venv
+where cargo >nul 2>nul
+if %errorlevel% equ 0 (
+    echo Компиляция и запуск через Cargo...
+    cargo run --release
+    exit /b 0
 )
 
-call venv\Scripts\activate.bat
-
-echo Проверка зависимостей (PySide6, OpenCV, NumPy, Pillow)...
-pip install -q -r requirements.txt
-
-echo Запуск приложения...
-python main.py
-
+echo [ОШИБКА] Rust/Cargo не найден! Установите с https://rustup.rs
 pause
