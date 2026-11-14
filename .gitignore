@@ -1,0 +1,23 @@
+# Python
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Output & temp images
+*.jpg
+*.jpeg
+*.png
+!assets/*.jpg
+!assets/*.png
+
+# IDE
+.idea/
+.vscode/
+*.swp
