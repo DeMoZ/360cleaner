@@ -10,11 +10,13 @@
 ![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-111827?logo=apple)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-111827?logo=windows)
 ![No AI](https://img.shields.io/badge/No%20AI-classic%20computer%20vision-10b981)
-![License: MIT](https://img.shields.io/badge/license-MIT-8b5cf6)
+[![License: MIT](https://img.shields.io/badge/license-MIT-8b5cf6)](LICENSE)
 
 [English](README.md) · [Русский](README.ru.md) · **ภาษาไทย**
 
 [**⬇ ดาวน์โหลด**](https://github.com/DeMoZ/360cleaner/releases/latest)
+
+<img src="docs/screenshot.png" width="860" alt="หน้าต่าง 360Cleaner">
 
 </div>
 
@@ -127,4 +129,4 @@ scripts/build-macos.sh                      # dist/360Cleaner.app, .dmg แล�
 
 ## 📄 สัญญาอนุญาต
 
-MIT
+[MIT](LICENSE)
