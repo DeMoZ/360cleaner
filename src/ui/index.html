@@ -692,6 +692,8 @@ body.drag-bad .drop-card { border-color: rgba(239,68,68,0.6); }
 </head>
 <body>
 
+<!-- Тексты в элементах с data-i18n / data-i18n-title подставляются из I18N (src/ui/i18n.js) -->
+
 <!-- ══ Верхняя панель ══════════════════════════════════════ -->
 <div class="header">
   <div class="logo">
@@ -703,29 +705,29 @@ body.drag-bad .drop-card { border-color: rgba(239,68,68,0.6); }
   <div class="header-sep"></div>
 
   <div class="drop-row">
-    <div class="drop-card" id="dz0" onclick="send('pick',{slot:0})" title="Нажмите или перетащите фото">
+    <div class="drop-card" id="dz0" onclick="send('pick',{slot:0})" data-i18n-title="dropTitle">
       <div class="drop-thumb" id="thumb0"><span class="placeholder-icon">📷</span></div>
       <div class="drop-info">
-        <div class="drop-label">Фото 1</div>
-        <div class="drop-name" id="name0">Перетащите или нажмите для выбора</div>
+        <div class="drop-label" data-i18n="photo1"></div>
+        <div class="drop-name" id="name0" data-i18n="dropHint"></div>
         <div class="drop-size" id="size0"></div>
       </div>
       <div class="drop-action">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Загрузить
+        <span data-i18n="load"></span>
       </div>
     </div>
 
-    <div class="drop-card" id="dz1" onclick="send('pick',{slot:1})" title="Нажмите или перетащите фото">
+    <div class="drop-card" id="dz1" onclick="send('pick',{slot:1})" data-i18n-title="dropTitle">
       <div class="drop-thumb" id="thumb1"><span class="placeholder-icon">📷</span></div>
       <div class="drop-info">
-        <div class="drop-label">Фото 2</div>
-        <div class="drop-name" id="name1">Перетащите или нажмите для выбора</div>
+        <div class="drop-label" data-i18n="photo2"></div>
+        <div class="drop-name" id="name1" data-i18n="dropHint"></div>
         <div class="drop-size" id="size1"></div>
       </div>
       <div class="drop-action">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Загрузить
+        <span data-i18n="load"></span>
       </div>
     </div>
   </div>
@@ -733,14 +735,14 @@ body.drag-bad .drop-card { border-color: rgba(239,68,68,0.6); }
   <div class="header-sep"></div>
 
   <div class="header-actions">
-    <button class="icon-btn" id="updBtn" onclick="openUpdates()" title="Обновления">
+    <button class="icon-btn" id="updBtn" onclick="openUpdates()" data-i18n-title="updatesTip">
       <span class="dot"></span>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="16,12 12,8 8,12"/><line x1="12" y1="16" x2="12" y2="8"/></svg>
       <span id="updLabel">v…</span>
     </button>
-    <button class="icon-btn donate" onclick="openDonate()" title="Поддержать разработку">
+    <button class="icon-btn donate" onclick="openDonate()" data-i18n-title="donateTip">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-      Поддержать
+      <span data-i18n="donate"></span>
     </button>
   </div>
 </div>
@@ -751,91 +753,101 @@ body.drag-bad .drop-card { border-color: rgba(239,68,68,0.6); }
   <div class="sidebar">
 
     <div class="sidebar-section">
-      <div class="section-label">Параметры обнаружения</div>
+      <div class="section-label" data-i18n="secDetect"></div>
 
-      <div class="slider-block" title="Насколько сильно должны различаться кадры. Меньше — ловит людей в одежде цвета фона, больше — не реагирует на колышущиеся листья.">
+      <div class="slider-block" data-i18n-title="thresholdTip">
         <div class="slider-row">
-          <span class="slider-name">Порог различий</span>
+          <span class="slider-name" data-i18n="threshold"></span>
           <span class="slider-val" id="v_threshold">24</span>
         </div>
         <input type="range" id="threshold" min="5" max="60" value="24" oninput="onSlider()">
       </div>
 
-      <div class="slider-block" title="На сколько расширить найденную область, чтобы захватить волосы, края одежды и тень.">
+      <div class="slider-block" data-i18n-title="dilateTip">
         <div class="slider-row">
-          <span class="slider-name">Захват силуэта и тени</span>
+          <span class="slider-name" data-i18n="dilate"></span>
           <span class="slider-val" id="v_dilate">25 px</span>
         </div>
         <input type="range" id="dilate" min="5" max="60" value="25" oninput="onSlider()">
       </div>
 
-      <div class="slider-block" title="Ширина плавного перехода между кадрами.">
+      <div class="slider-block" data-i18n-title="featherTip">
         <div class="slider-row">
-          <span class="slider-name">Смягчение шва</span>
+          <span class="slider-name" data-i18n="feather"></span>
           <span class="slider-val" id="v_feather">20 px</span>
         </div>
         <input type="range" id="feather" min="2" max="50" value="20" oninput="onSlider()">
       </div>
-      <button class="btn btn-ghost btn-small" onclick="resetParams()">Сбросить параметры</button>
+      <button class="btn btn-ghost btn-small" onclick="resetParams()" data-i18n="resetParams"></button>
     </div>
 
     <div class="divider"></div>
 
     <div class="sidebar-section">
-      <div class="section-label">Действия</div>
+      <div class="section-label" data-i18n="secActions"></div>
       <button class="btn btn-violet" id="swapBtn" onclick="toggleSwap()" disabled>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17,1 21,5 17,9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7,23 3,19 7,15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-        Поменять зоны
+        <span data-i18n="swap"></span>
       </button>
-      <div class="swap-state" id="swapState">Человек остался? Поменяйте зоны.</div>
+      <div class="swap-state" id="swapState"></div>
       <button class="btn btn-emerald" id="saveBtn" onclick="send('save')" disabled>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
-        Сохранить 360°
+        <span data-i18n="save"></span>
       </button>
     </div>
 
     <div class="divider"></div>
 
     <div class="sidebar-section">
-      <div class="section-label">Что показать</div>
+      <div class="section-label" data-i18n="secShow"></div>
       <div class="view-tabs" id="viewTabs">
         <button class="tab-btn active" data-tab="result" onclick="switchTab('result')">
-          <span class="tab-dot" style="background:var(--accent-emerald)"></span>Результат
+          <span class="tab-dot" style="background:var(--accent-emerald)"></span><span data-i18n="tabResult"></span>
         </button>
         <button class="tab-btn" data-tab="mask" onclick="switchTab('mask')">
-          <span class="tab-dot" style="background:var(--accent-blue)"></span>Карта различий
+          <span class="tab-dot" style="background:var(--accent-blue)"></span><span data-i18n="tabMask"></span>
         </button>
         <button class="tab-btn" data-tab="photo0" onclick="switchTab('photo0')">
-          <span class="tab-dot" style="background:var(--accent-cyan)"></span>Фото 1
+          <span class="tab-dot" style="background:var(--accent-cyan)"></span><span data-i18n="photo1"></span>
         </button>
         <button class="tab-btn" data-tab="photo1" onclick="switchTab('photo1')">
-          <span class="tab-dot" style="background:var(--accent-violet)"></span>Фото 2
+          <span class="tab-dot" style="background:var(--accent-violet)"></span><span data-i18n="photo2"></span>
         </button>
       </div>
-      <div class="hint">Клавиши 1–4 — вкладки, S — поменять зоны, пробел — 360°.</div>
+      <div class="hint" data-i18n="keysHint"></div>
     </div>
 
     <div class="divider"></div>
 
     <div class="sidebar-section">
-      <div class="section-label">Просмотр</div>
+      <div class="section-label" data-i18n="secView"></div>
       <button class="btn btn-toggle-360" id="btn360" onclick="toggle360()"></button>
       <div class="select-wrapper">
         <select class="aspect-select" id="aspectSelect" onchange="updateAspectFrame()">
-          <option value="2/1" selected>2 : 1 — вся панорама</option>
-          <option value="16/9">16 : 9 — широкий экран</option>
-          <option value="4/3">4 : 3 — классический</option>
-          <option value="1/1">1 : 1 — квадрат</option>
-          <option value="9/16">9 : 16 — Stories / Reels</option>
-          <option value="4/5">4 : 5 — Instagram</option>
+          <option value="2/1" selected data-label="arFull">2 : 1</option>
+          <option value="16/9" data-label="arWide">16 : 9</option>
+          <option value="4/3" data-label="arClassic">4 : 3</option>
+          <option value="1/1" data-label="arSquare">1 : 1</option>
+          <option value="9/16" data-fixed="Stories / Reels">9 : 16</option>
+          <option value="4/5" data-fixed="Instagram">4 : 5</option>
         </select>
         <span class="select-arrow">▾</span>
       </div>
       <div class="zoom-row">
-        <button class="zoom-btn" onclick="changeZoom(-0.15)" title="Уменьшить">−</button>
+        <button class="zoom-btn" onclick="changeZoom(-0.15)" data-i18n-title="zoomOut">−</button>
         <div class="zoom-display" id="zoomVal">100%</div>
-        <button class="zoom-btn" onclick="changeZoom(+0.15)" title="Увеличить">+</button>
-        <button class="zoom-reset" onclick="resetZoom()" title="Сбросить масштаб">↺</button>
+        <button class="zoom-btn" onclick="changeZoom(+0.15)" data-i18n-title="zoomIn">+</button>
+        <button class="zoom-reset" onclick="resetZoom()" data-i18n-title="zoomReset">↺</button>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="sidebar-section">
+      <div class="section-label">🌐 <span data-i18n="language"></span></div>
+      <div class="select-wrapper">
+        <select class="aspect-select" id="langSelect" onchange="send('set_language',{lang:this.value})"></select>
+        <span class="select-arrow">▾</span>
       </div>
     </div>
 
@@ -848,22 +860,21 @@ body.drag-bad .drop-card { border-color: rgba(239,68,68,0.6); }
         <canvas id="webgl-360-canvas"></canvas>
         <div class="loading-overlay" id="loadingOverlay">
           <div class="loading-ring"></div>
-          <span class="loading-label" id="loadingLabel">Обработка…</span>
+          <span class="loading-label" id="loadingLabel"></span>
         </div>
       </div>
 
       <div class="empty-state" id="emptyState">
         <div class="empty-icon">🌐</div>
-        <div class="empty-title">Загрузите два 360° кадра</div>
-        <div class="empty-desc">Два снимка с одной точки (со штатива), между которыми вы перешли на другую сторону.
-          Перетащите оба фото в окно сразу или по одному в поля сверху.</div>
+        <div class="empty-title" data-i18n="emptyTitle"></div>
+        <div class="empty-desc" data-i18n="emptyDesc"></div>
       </div>
     </div>
 
     <div class="statusbar">
       <div class="status-left">
         <div class="status-dot" id="statusDot"></div>
-        <span id="statusMsg">Готов. Загрузите две 360° фотографии.</span>
+        <span id="statusMsg"></span>
       </div>
       <div class="status-right" id="anglesInfo"></div>
     </div>
@@ -877,12 +888,12 @@ body.drag-bad .drop-card { border-color: rgba(239,68,68,0.6); }
   <div class="modal">
     <div class="modal-head">
       <div class="modal-icon pink">♥</div>
-      <div class="modal-title">Спасибо, что пользуетесь! <span class="spinner" id="donateSpin" style="display:none"></span></div>
+      <div class="modal-title"><span data-i18n="donateHeading"></span> <span class="spinner" id="donateSpin" style="display:none"></span></div>
       <button class="modal-close" onclick="closeModal('donateModal')">✕</button>
     </div>
     <div class="modal-text" id="donateMessage"></div>
     <div id="donateMethods" style="display:flex;flex-direction:column;gap:8px"></div>
-    <div class="modal-faint" id="donateOffline" style="display:none">Свежий список способов загрузить не удалось: показана сохранённая копия.</div>
+    <div class="modal-faint" id="donateOffline" style="display:none" data-i18n="donateOffline"></div>
   </div>
 </div>
 
@@ -891,20 +902,70 @@ body.drag-bad .drop-card { border-color: rgba(239,68,68,0.6); }
   <div class="modal">
     <div class="modal-head">
       <div class="modal-icon blue">↑</div>
-      <div class="modal-title" id="updTitle">Обновления</div>
+      <div class="modal-title" id="updTitle"></div>
       <button class="modal-close" onclick="closeModal('updateModal')">✕</button>
     </div>
     <div class="modal-text" id="updCurrent"></div>
     <div class="notes" id="updNotes" style="display:none"></div>
-    <div class="modal-text" id="updWarn" style="display:none;color:var(--accent-orange)"></div>
+    <div class="modal-text" id="updWarn" style="display:none;color:var(--accent-orange)" data-i18n="updWarn"></div>
     <div class="status-line" id="updStatus"></div>
-    <label class="check"><input type="checkbox" id="autoUpdate" onchange="send('set_auto_update',{value:this.checked})"> Проверять обновления автоматически (раз в сутки)</label>
-    <div class="modal-faint" id="updDev" style="display:none">Обновление работает только в собранной программе (из .dmg или .zip релиза).</div>
+    <label class="check"><input type="checkbox" id="autoUpdate" onchange="send('set_auto_update',{value:this.checked})"> <span data-i18n="autoUpdate"></span></label>
+    <div class="modal-faint" id="updDev" style="display:none" data-i18n="updDev"></div>
     <div class="modal-actions" id="updActions"></div>
   </div>
 </div>
 
 <script>
+/*I18N*/
+</script>
+<script>
+// ════════════════════════════════════════════════════════════
+// Перевод
+// ════════════════════════════════════════════════════════════
+let lang = 'en';
+let langSetting = '';
+let systemLang = 'en';
+
+/** Текст по ключу на текущем языке; {name} заменяется на args.name. Нет ключа — английский, потом сам ключ. */
+function t(key, args = {}) {
+  const text = (I18N[lang] && I18N[lang][key]) ?? I18N.en[key] ?? key;
+  return text.replace(/\{(\w+)\}/g, (m, k) => (args[k] !== undefined ? String(args[k]) : m));
+}
+
+function applyLanguage() {
+  document.documentElement.lang = lang === 'zh' ? 'zh-Hans' : lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    // имя загруженного файла не переводится
+    if (el.classList.contains('drop-name') && el.dataset.name) return;
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  for (const o of $('aspectSelect').options) {
+    const label = o.dataset.label ? t(o.dataset.label) : o.dataset.fixed;
+    o.textContent = o.value.replace('/', ' : ') + ' — ' + label;
+  }
+  const sel = $('langSelect');
+  sel.innerHTML = '';
+  const sys = document.createElement('option');
+  sys.value = '';
+  sys.textContent = `${t('langSystem')} (${LANG_NAMES[systemLang] || 'English'})`;
+  sel.appendChild(sys);
+  for (const code of Object.keys(LANG_NAMES)) {
+    const o = document.createElement('option');
+    o.value = code;
+    o.textContent = LANG_NAMES[code];
+    sel.appendChild(o);
+  }
+  sel.value = langSetting;
+  $('swapState').textContent = t(swap ? 'swapped' : 'swapHint');
+  $('loadingLabel').textContent = t(loadingKey);
+  render360Button();
+  renderStatus();
+  renderAngles();
+  renderUpdate();
+  if ($('donateModal').classList.contains('open')) send('donate_open');
+}
+
 // ════════════════════════════════════════════════════════════
 // Состояние
 // ════════════════════════════════════════════════════════════
@@ -922,6 +983,9 @@ let hasPreview = false;
 let appVersion = '';
 let canUpdate = false;
 let update = { checking: false, downloading: false, available: null, writable: false, status: null };
+let curStatus = { key: 'stReady', args: {}, state: '' };
+let angles = null;
+let loadingKey = 'procDefault';
 
 const images = { result: null, mask: null, photo0: null, photo1: null };
 const $ = id => document.getElementById(id);
@@ -935,33 +999,45 @@ function esc(s) {
 }
 
 // ════════════════════════════════════════════════════════════
-// Сообщения из Rust
+// Сообщения из Rust: тексты приходят ключами словаря
 // ════════════════════════════════════════════════════════════
 window.onRustMessage = function (msg) {
   switch (msg.type) {
     case 'init':
       appVersion = msg.version;
       canUpdate = msg.canUpdate;
-      $('updLabel').textContent = 'v' + msg.version;
+      lang = msg.lang;
+      langSetting = msg.language || '';
+      systemLang = msg.systemLang || 'en';
       $('autoUpdate').checked = msg.autoUpdate;
       setSliders(msg);
-      if (msg.updateFailed) toast('Обновление не установилось — запущена прежняя версия. Скачайте новую со страницы релиза.', 'err');
+      applyLanguage();
+      if (msg.updateFailed) toast(esc(t('updateFailedToast')), 'err', [], true);
+      break;
+
+    case 'lang':
+      lang = msg.lang;
+      langSetting = msg.language || '';
+      applyLanguage();
       break;
 
     case 'status':
-      setStatus(msg.text, msg.busy ? 'busy' : 'ready');
+      setStatus(msg.key, msg.args, msg.busy ? 'busy' : 'ready');
       break;
 
     case 'slot_loading': {
-      const card = $('dz' + msg.slot);
-      card.classList.add('loading');
-      $('name' + msg.slot).textContent = 'Открываю ' + msg.name + '…';
+      $('dz' + msg.slot).classList.add('loading');
+      const el = $('name' + msg.slot);
+      el.dataset.name = '';
+      el.textContent = t('opening', { name: msg.name });
       break;
     }
 
     case 'slot_failed': {
       $('dz' + msg.slot).classList.remove('loading');
-      $('name' + msg.slot).textContent = loaded[msg.slot] ? $('name' + msg.slot).dataset.name : 'Перетащите или нажмите для выбора';
+      const el = $('name' + msg.slot);
+      el.dataset.name = el.dataset.loaded || '';
+      el.textContent = el.dataset.name || t('dropHint');
       break;
     }
 
@@ -971,9 +1047,11 @@ window.onRustMessage = function (msg) {
       hasPreview = false;
       $('dz' + s).classList.remove('loading');
       $('dz' + s).classList.add('loaded');
-      $('name' + s).textContent = msg.name;
-      $('name' + s).dataset.name = msg.name;
-      $('name' + s).title = msg.name;
+      const el = $('name' + s);
+      el.textContent = msg.name;
+      el.dataset.name = msg.name;
+      el.dataset.loaded = msg.name;
+      el.title = msg.name;
       $('size' + s).textContent = msg.size || '';
       const src = 'data:image/jpeg;base64,' + msg.image_b64;
       $('thumb' + s).innerHTML = `<img src="${src}" alt="">`;
@@ -987,8 +1065,9 @@ window.onRustMessage = function (msg) {
     }
 
     case 'processing':
-      showLoading(true, msg.text);
-      setStatus(msg.text, 'busy');
+      loadingKey = msg.key;
+      showLoading(true, t(msg.key));
+      setStatus(msg.key, {}, 'busy');
       break;
 
     case 'preview_ready':
@@ -998,28 +1077,28 @@ window.onRustMessage = function (msg) {
       loadImg('mask', 'data:image/jpeg;base64,' + msg.mask_b64);
       loadImg('result', 'data:image/jpeg;base64,' + msg.result_b64);
       if (currentTab === 'photo0' || currentTab === 'photo1') switchTab('result');
-      $('anglesInfo').textContent =
-        `Зона A: ${msg.angle_a.toFixed(0)}° · Зона B: ${msg.angle_b.toFixed(0)}° · различий ${(msg.changed * 100).toFixed(1)}% · ${msg.ms} мс`;
-      if (msg.changed === 0) setStatus('Кадры не различаются: убирать нечего. Попробуйте понизить порог.', 'ready');
-      else if (msg.changed > 0.35) setStatus('Различий очень много: кадры сняты не с одной точки или порог слишком низкий.', 'busy');
-      else setStatus('Готово. Если человек остался — «Поменять зоны».', 'ready');
+      angles = { a: msg.angle_a.toFixed(0), b: msg.angle_b.toFixed(0), p: (msg.changed * 100).toFixed(1), ms: msg.ms };
+      renderAngles();
+      if (msg.changed === 0) setStatus('stNoDiff', {}, 'ready');
+      else if (msg.changed > 0.35) setStatus('stTooMuch', {}, 'busy');
+      else setStatus('stDone', {}, 'ready');
       updateButtons();
       break;
 
     case 'save_success':
       showLoading(false);
-      setStatus('Сохранено: ' + msg.name, 'ready');
-      toast('Панорама сохранена: ' + esc(msg.name), 'ok', [['Показать в папке', () => send('reveal')]], true);
+      setStatus('stSaved', { name: msg.name }, 'ready');
+      toast(esc(t('savedToast', { name: msg.name })), 'ok', [[t('showInFolder'), () => send('reveal')]], true);
       break;
 
     case 'warning':
-      toast(esc(msg.message), 'warn', [], true);
+      toast(esc(t(msg.key, msg.args)), 'warn', [], true);
       break;
 
     case 'error':
       showLoading(false);
-      setStatus(msg.message, '');
-      toast(esc(msg.message), 'err', [], true);
+      setStatus(msg.key, msg.args, '');
+      toast(esc(t(msg.key, msg.args)), 'err', [], true);
       break;
 
     case 'drag':
@@ -1079,7 +1158,7 @@ function resetParams() { setSliders(DEFAULTS); sendParams(); }
 function toggleSwap() {
   if (!(loaded[0] && loaded[1])) return;
   swap = !swap;
-  $('swapState').textContent = swap ? 'Зоны поменяны местами.' : 'Человек остался? Поменяйте зоны.';
+  $('swapState').textContent = t(swap ? 'swapped' : 'swapHint');
   sendParams();
 }
 
@@ -1102,7 +1181,7 @@ const ICON_FLAT = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" s
 
 function render360Button() {
   const btn = $('btn360');
-  btn.innerHTML = is360Mode ? ICON_FLAT + ' Плоский вид' : ICON_SPHERE + ' 360° сфера';
+  btn.innerHTML = (is360Mode ? ICON_FLAT : ICON_SPHERE) + ' ' + esc(t(is360Mode ? 'flat' : 'sphere'));
   btn.classList.toggle('active-360', is360Mode);
 }
 
@@ -1207,7 +1286,7 @@ function initWebGLIfNeeded() {
   if (gl) return;
   const c = $('webgl-360-canvas');
   gl = c.getContext('webgl', { alpha: false, antialias: true });
-  if (!gl) { toast('WebGL недоступен: 360° просмотр не работает на этом компьютере.', 'err'); return; }
+  if (!gl) { toast(esc(t('webglMissing')), 'err'); return; }
   const shader = (type, src) => {
     const s = gl.createShader(type);
     gl.shaderSource(s, src); gl.compileShader(s);
@@ -1287,30 +1366,39 @@ frame.addEventListener('wheel', e => {
 
 window.addEventListener('resize', updateAspectFrame);
 
-// ── Клавиши ───────────────────────────────────────────────
+// ── Клавиши: по коду клавиши, чтобы работали при любой раскладке ──
 window.addEventListener('keydown', e => {
   const mod = e.metaKey || e.ctrlKey;
-  if (mod && (e.key === 'q' || e.key === 'й')) { e.preventDefault(); send('quit'); return; }
-  if (mod && (e.key === 's' || e.key === 'ы')) { e.preventDefault(); if (hasPreview) send('save'); return; }
-  if (mod && (e.key === 'o' || e.key === 'щ')) { e.preventDefault(); send('pick', { slot: loaded[0] ? 1 : 0 }); return; }
+  if (mod && e.code === 'KeyQ') { e.preventDefault(); send('quit'); return; }
+  if (mod && e.code === 'KeyS') { e.preventDefault(); if (hasPreview) send('save'); return; }
+  if (mod && e.code === 'KeyO') { e.preventDefault(); send('pick', { slot: loaded[0] ? 1 : 0 }); return; }
   if (e.key === 'Escape') { closeModal('donateModal'); closeModal('updateModal'); return; }
   if (mod || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (document.querySelector('.modal-backdrop.open')) return;
-  const tabs = { '1': 'result', '2': 'mask', '3': 'photo0', '4': 'photo1' };
-  if (tabs[e.key]) switchTab(tabs[e.key]);
-  else if (e.key === 's' || e.key === 'ы') toggleSwap();
-  else if (e.key === ' ') { e.preventDefault(); toggle360(); }
-  else if (e.key === '+' || e.key === '=') changeZoom(0.15);
-  else if (e.key === '-') changeZoom(-0.15);
-  else if (e.key === '0') resetZoom();
+  const tabs = { Digit1: 'result', Digit2: 'mask', Digit3: 'photo0', Digit4: 'photo1' };
+  if (tabs[e.code]) switchTab(tabs[e.code]);
+  else if (e.code === 'KeyS') toggleSwap();
+  else if (e.code === 'Space') { e.preventDefault(); toggle360(); }
+  else if (e.key === '+' || e.code === 'Equal') changeZoom(0.15);
+  else if (e.key === '-' || e.code === 'Minus') changeZoom(-0.15);
+  else if (e.code === 'Digit0') resetZoom();
 });
 
 // ════════════════════════════════════════════════════════════
 // Статус и уведомления
 // ════════════════════════════════════════════════════════════
-function setStatus(text, state) {
-  $('statusMsg').textContent = text;
-  $('statusDot').className = 'status-dot' + (state ? ' ' + state : '');
+function setStatus(key, args, state) {
+  curStatus = { key, args: args || {}, state };
+  renderStatus();
+}
+
+function renderStatus() {
+  $('statusMsg').textContent = t(curStatus.key, curStatus.args);
+  $('statusDot').className = 'status-dot' + (curStatus.state ? ' ' + curStatus.state : '');
+}
+
+function renderAngles() {
+  $('anglesInfo').textContent = angles ? t('angles', angles) : '';
 }
 
 function showLoading(show, text) {
@@ -1400,38 +1488,41 @@ function renderUpdate() {
   const u = update;
   const a = u.available;
   $('updBtn').classList.toggle('has-update', !!a);
-  $('updLabel').textContent = a ? 'Версия ' + a.version : 'v' + appVersion;
-  $('updTitle').textContent = a ? 'Доступна версия ' + a.version : 'Обновления';
-  $('updCurrent').textContent = `Установлена версия ${appVersion}. Новые версии берутся из релизов на GitHub.`;
+  $('updLabel').textContent = a ? t('versionBtn', { v: a.version }) : 'v' + appVersion;
+  $('updTitle').textContent = a ? t('updAvailableTitle', { v: a.version }) : t('updTitle');
+  $('updCurrent').textContent = t('updCurrent', { v: appVersion });
   $('updNotes').style.display = a && a.notes ? 'block' : 'none';
   $('updNotes').textContent = a ? a.notes : '';
   $('updWarn').style.display = a && canUpdate && !u.writable ? 'block' : 'none';
-  $('updWarn').textContent = 'Эта копия не может обновить себя сама (нет прав на запись в её папку): скачайте новую версию со страницы релиза.';
   $('updDev').style.display = canUpdate ? 'none' : 'block';
   const st = $('updStatus');
-  if (u.checking) { st.className = 'status-line'; st.innerHTML = '<span class="spinner"></span> Проверяю…'; }
-  else if (u.downloading) { st.className = 'status-line new'; st.innerHTML = '<span class="spinner"></span> ' + esc(u.status ? u.status.text : 'Загружаю обновление…'); }
-  else if (u.status) { st.className = 'status-line ' + u.status.kind; st.textContent = u.status.text; }
+  const statusText = u.status ? t(u.status.key, u.status.args) : '';
+  if (u.checking) { st.className = 'status-line'; st.innerHTML = '<span class="spinner"></span> ' + esc(t('checking')); }
+  else if (u.downloading) { st.className = 'status-line new'; st.innerHTML = '<span class="spinner"></span> ' + esc(statusText); }
+  else if (u.status) { st.className = 'status-line ' + u.status.kind; st.textContent = statusText; }
   else { st.className = 'status-line'; st.textContent = ''; }
 
   const row = $('updActions');
   row.innerHTML = '';
   const busy = u.checking || u.downloading;
   if (a) {
-    row.appendChild(actionButton('Пропустить версию', 'btn-ghost', () => { send('update_skip'); closeModal('updateModal'); }, busy));
-    row.appendChild(actionButton('Позже', 'btn-ghost', () => closeModal('updateModal'), u.downloading));
-    if (canUpdate && u.writable) row.appendChild(actionButton('Обновить и перезапустить', 'btn-primary', () => send('update_install'), busy));
-    else row.appendChild(actionButton('Открыть страницу релиза', 'btn-primary', () => send('update_page')));
+    row.appendChild(actionButton(t('btnSkip'), 'btn-ghost', () => { send('update_skip'); closeModal('updateModal'); }, busy));
+    row.appendChild(actionButton(t('btnLater'), 'btn-ghost', () => closeModal('updateModal'), u.downloading));
+    if (canUpdate && u.writable) row.appendChild(actionButton(t('btnInstall'), 'btn-primary', () => send('update_install'), busy));
+    else row.appendChild(actionButton(t('btnPage'), 'btn-primary', () => send('update_page')));
   } else {
-    row.appendChild(actionButton('Все версии', 'btn-ghost', () => send('update_page')));
-    row.appendChild(actionButton('Проверить обновления', 'btn-primary', () => send('update_check'), busy || !canUpdate));
+    row.appendChild(actionButton(t('btnAll'), 'btn-ghost', () => send('update_page')));
+    row.appendChild(actionButton(t('btnCheck'), 'btn-primary', () => send('update_check'), busy || !canUpdate));
   }
 }
 
 // ════════════════════════════════════════════════════════════
-// Запуск
+// Запуск: до ответа Rust — английский или язык WebView
 // ════════════════════════════════════════════════════════════
-render360Button();
+lang = (navigator.language || 'en').slice(0, 2).toLowerCase();
+if (!I18N[lang]) lang = 'en';
+systemLang = lang;
+applyLanguage();
 syncLabels();
 updateButtons();
 setTimeout(updateAspectFrame, 50);

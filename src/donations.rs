@@ -1,4 +1,4 @@
-//! Раздел «Поддержать»: ссылки и тексты из репозитория DeMoZ/donations (файл `360cleaner.json`, формат schema 1),
+//! Окно «Поддержать»: ссылки и тексты из репозитория DeMoZ/donations (файл `360cleaner.json`, формат schema 1),
 //! как в ADB Toolkit, EnhanceCapCut, LocalAIBar и UniversalKM. Ссылки меняются там без нового релиза программы.
 //!
 //! Порядок: raw.githubusercontent.com, зеркало jsDelivr, последняя сохранённая копия, копия внутри программы.
@@ -9,9 +9,6 @@ use crate::net;
 
 pub const FILE: &str = "360cleaner.json";
 const BUILT_IN: &str = include_str!("../assets/donations.json");
-
-/// Языки интерфейса по порядку: программа на русском.
-const LANGUAGES: [&str; 1] = ["ru"];
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Method {
@@ -61,7 +58,8 @@ fn text(v: Option<&Value>, languages: &[&str]) -> Option<String> {
 
 /// Разбор нестрогий: неизвестные поля пропускаются, способ без названия или без ссылки https:// отбрасывается.
 /// None — не JSON или нет ни одного подходящего способа.
-pub fn parse(data: &[u8]) -> Option<Info> {
+pub fn parse(data: &[u8], lang: &str) -> Option<Info> {
+    let languages = [lang];
     let v: Value = serde_json::from_slice(data).ok()?;
     let methods: Vec<Method> = v
         .get("methods")?
@@ -74,8 +72,8 @@ pub fn parse(data: &[u8]) -> Option<Info> {
             }
             Some(Method {
                 id: m.get("id").and_then(Value::as_str).unwrap_or(&url).to_string(),
-                title: text(m.get("title"), &LANGUAGES)?,
-                description: text(m.get("description"), &LANGUAGES),
+                title: text(m.get("title"), &languages)?,
+                description: text(m.get("description"), &languages),
                 url,
             })
         })
@@ -83,32 +81,40 @@ pub fn parse(data: &[u8]) -> Option<Info> {
     if methods.is_empty() {
         return None;
     }
-    Some(Info { message: text(v.get("message"), &LANGUAGES), methods })
+    Some(Info { message: text(v.get("message"), &languages), methods })
 }
 
 fn cache_file() -> std::path::PathBuf {
     net::cache_dir().join("donations.json")
 }
 
-/// Что показать сразу: последняя загруженная копия или копия внутри программы.
-pub fn cached() -> Info {
+/// Файл, который показать сразу: последняя загруженная копия или копия внутри программы.
+/// Хранится целиком, а не разобранным: язык можно сменить, пока программа открыта.
+pub fn cached() -> Vec<u8> {
     std::fs::read(cache_file())
         .ok()
-        .and_then(|d| parse(&d))
-        .unwrap_or_else(|| parse(BUILT_IN.as_bytes()).expect("built-in"))
+        .filter(|d| parse(d, "en").is_some())
+        .unwrap_or_else(|| BUILT_IN.as_bytes().to_vec())
+}
+
+/// Разбор на языке интерфейса; негодный файл заменяется копией внутри программы.
+pub fn info(data: &[u8], lang: &str) -> Info {
+    parse(data, lang).unwrap_or_else(|| parse(BUILT_IN.as_bytes(), lang).expect("built-in"))
 }
 
 /// Загружает свежий файл и сохраняет в кэш; None — ни один источник не ответил подходящим файлом.
-pub fn download() -> Option<Info> {
+pub fn download() -> Option<Vec<u8>> {
     for url in sources() {
         let Ok(data) = net::get(&url, 10) else { continue };
-        let Some(info) = parse(&data) else { continue };
+        if parse(&data, "en").is_none() {
+            continue;
+        }
         let file = cache_file();
         if let Some(dir) = file.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
         let _ = std::fs::write(file, &data);
-        return Some(info);
+        return Some(data);
     }
     None
 }
@@ -119,8 +125,24 @@ mod tests {
 
     #[test]
     fn built_in_file_is_valid() {
-        let info = parse(BUILT_IN.as_bytes()).unwrap();
-        assert!(info.message.unwrap().contains("360Cleaner"));
+        for lang in crate::i18n::LANGUAGES {
+            let info = parse(BUILT_IN.as_bytes(), lang).unwrap();
+            assert!(info.message.unwrap().contains("360Cleaner"));
+        }
+        let info = parse(BUILT_IN.as_bytes(), "ru").unwrap();
+        assert!(info.methods[0].title.contains("Карта"));
+        // в копии внутри программы есть тексты на всех языках интерфейса
+        let v: Value = serde_json::from_str(BUILT_IN).unwrap();
+        for lang in crate::i18n::LANGUAGES {
+            assert!(v["message"].get(lang).is_some(), "message: no {lang}");
+            for m in v["methods"].as_array().unwrap() {
+                assert!(
+                    m["title"].get(lang).is_some() && m["description"].get(lang).is_some(),
+                    "{}: no {lang}",
+                    m["id"]
+                );
+            }
+        }
         assert!(info.methods.iter().all(|m| m.url.starts_with("https://")));
     }
 
@@ -133,14 +155,14 @@ mod tests {
             {"id":"d","title":{"pt-BR":"x","en":"Only en"},"description":{"en":"desc"},"url":"https://pay.example/d"},
             {"id":"e","url":"https://pay.example/e"}
         ]}"#;
-        let info = parse(json.as_bytes()).unwrap();
+        let info = parse(json.as_bytes(), "ru").unwrap();
         assert_eq!(info.message.as_deref(), Some("Hello"));
         assert_eq!(info.methods.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["a", "d"]);
         assert_eq!(info.methods[0].title, "Карта");
         assert_eq!(info.methods[1].title, "Only en");
         assert_eq!(info.methods[1].description.as_deref(), Some("desc"));
-        assert!(parse(br#"{"methods":[{"title":"x","url":"http://a"}]}"#).is_none());
-        assert!(parse(b"not json").is_none());
+        assert!(parse(br#"{"methods":[{"title":"x","url":"http://a"}]}"#, "en").is_none());
+        assert!(parse(b"not json", "en").is_none());
     }
 
     #[test]

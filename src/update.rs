@@ -78,9 +78,9 @@ pub fn parse_release(json: &str, suffix: &str) -> Option<Release> {
     })
 }
 
-/// Описание релиза для окна обновления: без раздела «Установка» и разметки заголовков.
+/// Описание релиза для окна обновления: без раздела «Установка» / «Installation» и разметки заголовков.
 fn release_notes(body: &str) -> String {
-    let body = body.split("\n## Установка").next().unwrap_or(body);
+    let body = ["\n## Установка", "\n## Install"].iter().fold(body, |b, h| b.split(h).next().unwrap_or(b));
     body.lines().map(|l| l.trim_start_matches('#').trim_start()).collect::<Vec<_>>().join("\n").trim().to_string()
 }
 
@@ -130,9 +130,7 @@ pub fn download(release: &Release) -> Result<PathBuf, String> {
     if let Some(expected) = &release.sha256 {
         let actual = sha256_file(&zip).map_err(|e| e.to_string())?;
         if &actual != expected {
-            return Err(format!(
-                "скачанный архив не совпадает с опубликованной суммой SHA-256 ({actual} ≠ {expected})"
-            ));
+            return Err(format!("the downloaded archive does not match the published SHA-256 ({actual} ≠ {expected})"));
         }
     }
     let unpacked = work.join("app");
@@ -151,7 +149,7 @@ pub fn download(release: &Release) -> Result<PathBuf, String> {
         command("/usr/bin/ditto").arg("-x").arg("-k").arg(&zip).arg(&unpacked).status()
     };
     if !status.map(|s| s.success()).unwrap_or(false) {
-        return Err("не удалось распаковать архив обновления".into());
+        return Err("could not unpack the update archive".into());
     }
     let _ = std::fs::remove_file(&zip);
     let found = if cfg!(windows) {
@@ -159,7 +157,7 @@ pub fn download(release: &Release) -> Result<PathBuf, String> {
     } else {
         find(&unpacked, &|p| p.extension().is_some_and(|e| e == "app"))
     };
-    found.ok_or_else(|| "в архиве обновления нет программы".into())
+    found.ok_or_else(|| "the update archive has no app inside".into())
 }
 
 fn find(dir: &Path, pred: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
@@ -273,6 +271,13 @@ mod tests {
         assert_eq!(win.sha256, None);
         assert!(parse_release(LATEST, "-linux.zip").is_none());
         assert!(parse_release("{}", "-windows-x64.zip").is_none());
+    }
+
+    #[test]
+    fn notes_without_install_sections() {
+        let body =
+            "## What's new\n- Languages\n\n## Что нового\n- Языки\n\n## Installation\n- dmg\n\n## Установка\n- dmg";
+        assert_eq!(release_notes(body), "What's new\n- Languages\n\nЧто нового\n- Языки");
     }
 
     #[test]
