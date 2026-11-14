@@ -29,16 +29,12 @@ pub fn get(url: &str, timeout_secs: u32) -> Result<Vec<u8>, String> {
     let out = curl()
         .args(["--max-time", &timeout_secs.to_string(), url])
         .output()
-        .map_err(|e| format!("не удалось запустить curl: {e}"))?;
+        .map_err(|e| format!("could not run curl: {e}"))?;
     if out.status.success() {
         Ok(out.stdout)
     } else {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        Err(if err.is_empty() {
-            format!("curl завершился с кодом {:?}", out.status.code())
-        } else {
-            err
-        })
+        Err(if err.is_empty() { format!("curl exited with code {:?}", out.status.code()) } else { err })
     }
 }
 
@@ -49,14 +45,14 @@ pub fn download(url: &str, to: &Path) -> Result<(), String> {
         .arg(to)
         .arg(url)
         .output()
-        .map_err(|e| format!("не удалось запустить curl: {e}"))?;
+        .map_err(|e| format!("could not run curl: {e}"))?;
     if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
 }
 
 /// Открывает страницу в браузере. Только https://.
 pub fn open_url(url: &str) -> std::io::Result<()> {
     if !is_https(url) {
-        return Err(std::io::Error::other("разрешены только ссылки https://"));
+        return Err(std::io::Error::other("only https:// links are allowed"));
     }
     if cfg!(windows) {
         command("rundll32.exe").args(["url.dll,FileProtocolHandler", url]).spawn().map(|_| ())

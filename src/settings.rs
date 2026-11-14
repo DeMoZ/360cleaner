@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
+    /// Код языка интерфейса; пусто — язык системы.
+    pub language: String,
     pub auto_update: bool,
     /// Время последней проверки обновлений (секунды Unix).
     pub last_update_check: u64,
@@ -19,6 +21,7 @@ impl Default for Settings {
     fn default() -> Self {
         let p = crate::processor::Params::default();
         Settings {
+            language: String::new(),
             auto_update: true,
             last_update_check: 0,
             skipped_version: String::new(),

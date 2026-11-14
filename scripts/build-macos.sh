@@ -32,7 +32,10 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.photography</string>
-  <key>CFBundleDevelopmentRegion</key><string>ru</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleAllowMixedLocalizations</key><true/>
+  <key>CFBundleLocalizations</key>
+  <array><string>en</string><string>ru</string><string>es</string><string>pt</string><string>de</string><string>fr</string><string>zh-Hans</string><string>ja</string></array>
 </dict>
 </plist>
 PLIST

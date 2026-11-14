@@ -9,6 +9,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod donations;
+mod i18n;
 mod net;
 mod processor;
 mod settings;
@@ -53,12 +54,18 @@ impl Ui {
         let _ = self.0.send_event(UserEvent::Js(script));
     }
 
-    fn status(&self, text: impl Into<String>, busy: bool) {
-        self.send(json!({"type": "status", "text": text.into(), "busy": busy}));
+    // Тексты переводит окно: сюда идут ключ словаря `I18N` и параметры подстановки.
+
+    fn status(&self, key: &str, args: Value, busy: bool) {
+        self.send(json!({"type": "status", "key": key, "args": args, "busy": busy}));
     }
 
-    fn error(&self, text: impl Into<String>) {
-        self.send(json!({"type": "error", "message": text.into()}));
+    fn error(&self, key: &str, args: Value) {
+        self.send(json!({"type": "error", "key": key, "args": args}));
+    }
+
+    fn processing(&self, key: &str) {
+        self.send(json!({"type": "processing", "key": key}));
     }
 }
 
@@ -90,7 +97,10 @@ struct State {
     exporting: bool,
     last_saved: Option<PathBuf>,
     settings: Settings,
-    donations: donations::Info,
+    /// Язык интерфейса (код из `i18n::LANGUAGES`).
+    lang: &'static str,
+    /// Файл донатов целиком: разбирается на языке интерфейса при показе.
+    donations: Vec<u8>,
     donations_loading: bool,
     updates: UpdateState,
 }
@@ -118,6 +128,8 @@ struct Request {
     url: Option<String>,
     #[serde(default)]
     value: Option<bool>,
+    #[serde(default)]
+    lang: Option<String>,
 }
 
 fn jpeg_bytes(img: &RgbImage, quality: u8) -> Result<Vec<u8>, String> {
@@ -140,6 +152,11 @@ fn is_image(path: &Path) -> bool {
         .is_some_and(|e| IMAGE_EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
+/// Страница окна со словарём переводов внутри.
+fn page() -> String {
+    include_str!("ui/index.html").replace("/*I18N*/", include_str!("ui/i18n.js"))
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let ui = Ui(event_loop.create_proxy());
@@ -158,6 +175,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         computed: None,
         exporting: false,
         last_saved: None,
+        lang: i18n::resolve(&settings.language),
         settings,
         donations: donations::cached(),
         donations_loading: false,
@@ -184,7 +202,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ipc_compute = compute_tx.clone();
 
     let webview = WebViewBuilder::new()
-        .with_html(include_str!("ui/index.html"))
+        .with_html(page())
         // файлы из Finder / Проводника перехватываются до WebView, иначе он открыл бы картинку вместо программы
         .with_drag_drop_handler(move |event| {
             match event {
@@ -203,7 +221,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .with_ipc_handler(move |msg| match serde_json::from_str::<Request>(msg.body()) {
             Ok(req) => handle_request(req, &ipc_state, &ipc_ui, &ipc_proxy, &ipc_compute),
-            Err(e) => eprintln!("Неверное сообщение из окна: {e}"),
+            Err(e) => eprintln!("bad message from the window: {e}"),
         })
         .build(&window)?;
 
@@ -216,13 +234,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let _ = webview.evaluate_script(&script);
                 }
                 UserEvent::PickFile(slot) => {
-                    let title = if slot == 0 {
-                        "Выберите первое 360° фото"
-                    } else {
-                        "Выберите второе 360° фото"
-                    };
-                    if let Some(file) =
-                        rfd::FileDialog::new().set_title(title).add_filter("360° фото", &IMAGE_EXTENSIONS).pick_file()
+                    let lang = lock(&state).lang;
+                    let title = i18n::tr(lang, if slot == 0 { i18n::Text::PickFirst } else { i18n::Text::PickSecond });
+                    if let Some(file) = rfd::FileDialog::new()
+                        .set_title(title)
+                        .add_filter(i18n::tr(lang, i18n::Text::Photos), &IMAGE_EXTENSIONS)
+                        .pick_file()
                     {
                         load_file(slot, file, &state, &ui, &compute_tx);
                     }
@@ -243,6 +260,10 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
             let p = st.params;
             ui.send(json!({
                 "type": "init",
+                "lang": st.lang,
+                "language": st.settings.language,
+                "languages": i18n::LANGUAGES,
+                "systemLang": i18n::system_language(),
                 "version": env!("CARGO_PKG_VERSION"),
                 "repo": update::REPO,
                 "threshold": p.threshold, "dilate": p.dilate, "feather": p.feather,
@@ -296,7 +317,7 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
             if let Some(path) = lock(state).last_saved.clone()
                 && let Err(e) = net::reveal(&path)
             {
-                ui.error(format!("Не удалось показать файл: {e}"));
+                ui.error("errReveal", json!({"err": e.to_string()}));
             }
         }
         "quit" => {
@@ -307,7 +328,7 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
             if let Some(url) = req.url
                 && let Err(e) = net::open_url(&url)
             {
-                ui.error(format!("Не удалось открыть браузер: {e}"));
+                ui.error("errBrowser", json!({"err": e.to_string()}));
             }
         }
         "update_check" => check_updates(state, ui, true),
@@ -326,12 +347,20 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
                 .unwrap_or_else(|| format!("https://github.com/{}/releases", update::REPO));
             let _ = net::open_url(&url);
         }
+        "set_language" => {
+            let mut st = lock(state);
+            let setting = req.lang.unwrap_or_default();
+            st.settings.language = i18n::supported(&setting).map(str::to_string).unwrap_or_default();
+            st.lang = i18n::resolve(&st.settings.language);
+            st.settings.save();
+            ui.send(json!({"type": "lang", "lang": st.lang, "language": st.settings.language}));
+        }
         "set_auto_update" => {
             let mut st = lock(state);
             st.settings.auto_update = req.value.unwrap_or(true);
             st.settings.save();
         }
-        other => eprintln!("Неизвестное действие из окна: {other}"),
+        other => eprintln!("unknown action from the window: {other}"),
     }
 }
 
@@ -340,7 +369,7 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
 fn files_dropped(paths: Vec<PathBuf>, state: &Shared, ui: &Ui, compute: &Sender<()>) {
     let images: Vec<PathBuf> = paths.into_iter().filter(|p| is_image(p)).collect();
     match images.as_slice() {
-        [] => ui.error("Перетащите фото JPG, PNG или TIFF."),
+        [] => ui.error("errDropTypes", json!({})),
         [one] => {
             let st = lock(state);
             // одно фото — в первый пустой слот, если оба заняты — во второй
@@ -360,7 +389,7 @@ fn load_file(slot: usize, path: PathBuf, state: &Shared, ui: &Ui, compute: &Send
     std::thread::spawn(move || {
         let name = file_name(&path);
         ui.send(json!({"type": "slot_loading", "slot": slot, "name": name}));
-        ui.status(format!("Открываю фото {} — {name}…", slot + 1), true);
+        ui.status("stLoading", json!({"n": slot + 1, "name": name}), true);
         let full_size = image::image_dimensions(&path).ok();
         match processor::load_image(&path, Some(processor::PREVIEW_DIM)) {
             Ok(preview) => {
@@ -368,9 +397,7 @@ fn load_file(slot: usize, path: PathBuf, state: &Shared, ui: &Ui, compute: &Send
                 if let Some((w, h)) = full_size
                     && (w as f32 / h as f32 - 2.0).abs() > 0.05
                 {
-                    warning = Some(format!(
-                        "{name}: {w}×{h} — не похоже на 360° панораму 2:1, результат может быть неточным."
-                    ));
+                    warning = Some(("warnNot360", json!({"name": name, "w": w, "h": h})));
                 }
                 let image_b64 = jpeg_b64(&preview, 85);
                 let mut st = lock(&state);
@@ -380,7 +407,7 @@ fn load_file(slot: usize, path: PathBuf, state: &Shared, ui: &Ui, compute: &Send
                 if let [Some(a), Some(b)] = &st.slots {
                     let (da, db) = (image::image_dimensions(&a.path).ok(), image::image_dimensions(&b.path).ok());
                     if da != db && warning.is_none() {
-                        warning = Some("Фото разного размера: второе будет приведено к размеру первого.".into());
+                        warning = Some(("warnSizes", json!({})));
                     }
                 }
                 let both = st.slots.iter().all(Option::is_some);
@@ -389,18 +416,18 @@ fn load_file(slot: usize, path: PathBuf, state: &Shared, ui: &Ui, compute: &Send
                     "type": "file_loaded", "slot": slot, "name": name, "image_b64": image_b64,
                     "size": full_size.map(|(w, h)| format!("{w}×{h}")),
                 }));
-                if let Some(w) = warning {
-                    ui.send(json!({"type": "warning", "message": w}));
+                if let Some((key, args)) = warning {
+                    ui.send(json!({"type": "warning", "key": key, "args": args}));
                 }
                 if both {
                     let _ = compute.send(());
                 } else {
-                    ui.status("Загружено: ".to_string() + &name + ". Добавьте второе фото.", false);
+                    ui.status("stNeedSecond", json!({"name": name}), false);
                 }
             }
             Err(e) => {
                 ui.send(json!({"type": "slot_failed", "slot": slot}));
-                ui.error(format!("Не удалось открыть {name}: {e}"));
+                ui.error("errOpen", json!({"name": name, "err": e}));
             }
         }
     });
@@ -418,7 +445,7 @@ fn compute_worker(rx: Receiver<()>, state: Shared, ui: Ui) {
             }
             (a.preview.clone(), b.preview.clone(), st.params, st.generation)
         };
-        ui.send(json!({"type": "processing", "text": "Ищу различия и убираю человека…"}));
+        ui.processing("procPreview");
         let (w, h) = img1.dimensions();
         let img2 = processor::match_size(img2, w, h);
         let started = std::time::Instant::now();
@@ -450,19 +477,19 @@ fn save(state: &Shared, ui: &Ui) {
         return;
     }
     let [Some(a), Some(b)] = &st.slots else {
-        ui.error("Сначала загрузите оба фото.");
+        ui.error("errNeedBoth", json!({}));
         return;
     };
     let Some(computed) = st.computed.as_ref().filter(|c| c.generation == st.generation) else {
-        ui.error("Дождитесь окончания расчёта превью.");
+        ui.error("errWaitPreview", json!({}));
         return;
     };
-    let (path1, path2, alpha) = (a.path.clone(), b.path.clone(), computed.alpha.clone());
+    let (path1, path2, alpha, lang) = (a.path.clone(), b.path.clone(), computed.alpha.clone(), st.lang);
     drop(st);
 
     let stem = path1.file_stem().unwrap_or_default().to_string_lossy().into_owned();
     let mut dialog = rfd::FileDialog::new()
-        .set_title("Сохранить чистую 360° панораму")
+        .set_title(i18n::tr(lang, i18n::Text::SaveTitle))
         .set_file_name(format!("{stem}_clean.jpg"))
         .add_filter("JPEG", &["jpg", "jpeg"]);
     if let Some(dir) = path1.parent() {
@@ -473,14 +500,14 @@ fn save(state: &Shared, ui: &Ui) {
         out.set_extension("jpg");
     }
     if out == path1 || out == path2 {
-        ui.error("Нельзя сохранить поверх исходного фото: выберите другое имя.");
+        ui.error("errOverwrite", json!({}));
         return;
     }
     lock(state).exporting = true;
 
     let (state, ui) = (Arc::clone(state), ui.clone());
     std::thread::spawn(move || {
-        ui.send(json!({"type": "processing", "text": "Сохраняю в полном разрешении…"}));
+        ui.processing("procSave");
         let result = export(&path1, &path2, &alpha, &out);
         let mut st = lock(&state);
         st.exporting = false;
@@ -492,7 +519,7 @@ fn save(state: &Shared, ui: &Ui) {
             }
             Err(e) => {
                 drop(st);
-                ui.error(format!("Не удалось сохранить: {e}"));
+                ui.error("errSave", json!({"err": e}));
             }
         }
     });
@@ -519,14 +546,15 @@ fn export(path1: &Path, path2: &Path, alpha: &Alpha, out: &Path) -> Result<(), S
 
 // ---------------------------------------------------------------- донаты
 
-fn donations_msg(info: &donations::Info, loading: bool, offline: bool) -> Value {
+fn donations_msg(st: &State, loading: bool, offline: bool) -> Value {
+    let info = donations::info(&st.donations, st.lang);
     json!({"type": "donations", "info": info, "loading": loading, "offline": offline})
 }
 
 /// При каждом открытии окна файл загружается заново; до ответа видна последняя копия.
 fn open_donations(state: &Shared, ui: &Ui) {
     let mut st = lock(state);
-    ui.send(donations_msg(&st.donations, true, false));
+    ui.send(donations_msg(&st, true, false));
     if st.donations_loading {
         return;
     }
@@ -538,16 +566,17 @@ fn open_donations(state: &Shared, ui: &Ui) {
         let mut st = lock(&state);
         st.donations_loading = false;
         let offline = fresh.is_none();
-        if let Some(info) = fresh {
-            st.donations = info;
+        if let Some(data) = fresh {
+            st.donations = data;
         }
-        ui.send(donations_msg(&st.donations, false, offline));
+        ui.send(donations_msg(&st, false, offline));
     });
 }
 
 // ---------------------------------------------------------------- обновления
 
-fn update_msg(st: &State, status: Option<(&str, String)>) -> Value {
+/// `status` — (вид: ok / err / new, ключ словаря, параметры).
+fn update_msg(st: &State, status: Option<(&str, &str, Value)>) -> Value {
     let target = update::install_target();
     let writable = target.as_deref().is_some_and(update::can_write);
     let available = st
@@ -561,7 +590,7 @@ fn update_msg(st: &State, status: Option<(&str, String)>) -> Value {
         "downloading": st.updates.downloading,
         "available": available,
         "writable": writable,
-        "status": status.map(|(kind, text)| json!({"kind": kind, "text": text})),
+        "status": status.map(|(kind, key, args)| json!({"kind": kind, "key": key, "args": args})),
     })
 }
 
@@ -589,7 +618,7 @@ fn check_updates(state: &Shared, ui: &Ui, manual: bool) {
                         let v = format_version(r.version);
                         let offer = st.updates.manual || st.settings.skipped_version != v;
                         st.updates.available = Some(r);
-                        let msg = update_msg(&st, Some(("new", format!("Доступна версия {v}."))));
+                        let msg = update_msg(&st, Some(("new", "updNew", json!({"v": v}))));
                         ui.send(msg);
                         if offer {
                             ui.send(json!({"type": "update_offer"}));
@@ -598,11 +627,11 @@ fn check_updates(state: &Shared, ui: &Ui, manual: bool) {
                     }
                     None => {
                         st.updates.available = None;
-                        ("ok", format!("Установлена последняя версия {}.", format_version(current)))
+                        ("ok", "updLatest", json!({"v": format_version(current)}))
                     }
                 }
             }
-            Err(e) => ("err", format!("Не удалось проверить обновления: {e}")),
+            Err(e) => ("err", "updCheckFailed", json!({"err": e})),
         };
         ui.send(update_msg(&st, Some(status)));
     });
@@ -614,27 +643,27 @@ fn install_update(state: &Shared, ui: &Ui, proxy: &EventLoopProxy<UserEvent>) {
         return;
     }
     if st.exporting {
-        ui.error("Дождитесь окончания сохранения, потом обновите программу.");
+        ui.error("errWaitSave", json!({}));
         return;
     }
     let Some(release) = st.updates.available.clone() else { return };
     st.updates.downloading = true;
-    ui.send(update_msg(&st, Some(("new", format!("Загружаю 360Cleaner {}…", format_version(release.version))))));
+    ui.send(update_msg(&st, Some(("new", "updDownloading", json!({"v": format_version(release.version)})))));
     drop(st);
     let (state, ui, proxy) = (Arc::clone(state), ui.clone(), proxy.clone());
     std::thread::spawn(move || {
         let result = update::download(&release).and_then(|source| {
-            let target = update::install_target().ok_or("не найдено, где установлена программа")?;
-            update::start_install(&source, &target).map_err(|e| format!("не удалось запустить установку: {e}"))
+            let target = update::install_target().ok_or("could not find where the app is installed")?;
+            update::start_install(&source, &target).map_err(|e| format!("could not start the installer: {e}"))
         });
         let mut st = lock(&state);
         st.updates.downloading = false;
         match result {
             Ok(()) => {
-                ui.send(update_msg(&st, Some(("ok", "Обновление загружено, перезапускаю программу.".into()))));
+                ui.send(update_msg(&st, Some(("ok", "updRestarting", json!({})))));
                 let _ = proxy.send_event(UserEvent::Quit);
             }
-            Err(e) => ui.send(update_msg(&st, Some(("err", format!("Обновление не установлено: {e}"))))),
+            Err(e) => ui.send(update_msg(&st, Some(("err", "updFailed", json!({"err": e}))))),
         }
     });
 }
