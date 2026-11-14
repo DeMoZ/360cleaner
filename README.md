@@ -1,98 +1,132 @@
+<div align="center">
+
+<img src="assets/icon.png" width="112" alt="360Cleaner">
+
 # 360Cleaner
 
-Убирает фотографа и случайных людей с 360° панорамы по кадрам с одной точки (со штатива) и сохраняет её в нужном
-размере и качестве. Что делать, программа решает по числу фото:
+**Remove the photographer and passers-by from 360° panoramas — and save them up to 20× lighter.**
 
-- **одно фото** — убирать нечего, панорама просто пересохраняется легче (меньше размер, ниже качество JPEG);
-- **два фото** — между ними вы переходите на другую сторону; там, где кадры различаются, берутся пиксели из того
-  кадра, где вас нет;
-- **три и больше** — когда вокруг ходят люди: фон берётся как медиана всех кадров, и каждое место — с кадра, где
-  там никого нет.
+[![Release](https://img.shields.io/github/v/release/DeMoZ/360cleaner?label=release&color=3b82f6)](https://github.com/DeMoZ/360cleaner/releases/latest)
+![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-111827?logo=apple)
+![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-111827?logo=windows)
+![No AI](https://img.shields.io/badge/No%20AI-classic%20computer%20vision-10b981)
+[![License: MIT](https://img.shields.io/badge/license-MIT-8b5cf6)](LICENSE)
 
-Только классическое компьютерное зрение, без нейросетей: ничего не «дорисовывается», резкость исходника
-сохраняется, метаданные сферической панорамы (XMP GPano, EXIF, ICC) переносятся в результат — Google Photos,
-Facebook, VR-шлемы и Insta360 Studio открывают его как 360°.
+**English** · [Русский](README.ru.md) · [ภาษาไทย](README.th.md)
 
-Mac (Apple Silicon) и Windows 10/11. Rust + системный WebView (tao + wry), обработка параллельно через Rayon.
+[**⬇ Download**](https://github.com/DeMoZ/360cleaner/releases/latest)
 
-Языки интерфейса: English, Русский, Español, Português, Deutsch, Français, 中文, 日本語. Программа открывается на
-языке системы (если его нет в списке — на английском); сменить язык можно внизу боковой панели.
+<img src="docs/screenshot.png" width="860" alt="360Cleaner window">
 
-## Установка
+</div>
 
-Скачайте последнюю версию со страницы [Releases](https://github.com/DeMoZ/360cleaner/releases/latest).
+---
 
-- **Mac:** `360Cleaner-macOS-v….dmg`, перетащите приложение в «Программы». Файл `…-macos-arm64.zip` в релизе —
-  для автообновления, скачивать его не нужно. Приложение не подписано сертификатом Apple, поэтому первый запуск
-  macOS блокирует: нажмите «Готово» (Done), откройте «Системные настройки → Конфиденциальность и безопасность»
-  (System Settings → Privacy & Security) и нажмите «Всё равно открыть» (Open Anyway).
-- **Windows:** распакуйте `360Cleaner-…-windows-x64.zip` и запустите `360Cleaner.exe` (SmartScreen: «Подробнее» →
-  «Выполнить в любом случае»). Нужен Microsoft Edge WebView2 — в Windows 10/11 он обычно уже есть.
+## ✨ What it does
 
-Дальше программа обновляется сама: кнопка с номером версии в правом верхнем углу, автоматическая проверка раз в
-сутки (можно выключить).
+Shoot a few 360° photos from the same spot, drop them into the window, save the result. What happens depends on
+how many photos you add:
 
-## Как снимать
+| Photos | Mode | What you get |
+| :---: | :--- | :--- |
+| **1** | Re-save | Nothing to remove: the panorama is saved again at the size and quality you pick. |
+| **2** | Photographer | You stand on opposite sides in the two shots; each spot is taken from the shot where you aren't. |
+| **3+** | Passers-by | For crowded places: each area is taken from a shot where nobody is there. |
 
-1. Камера на штативе, кадр 1: вы стоите с одной стороны.
-2. Не двигая штатив, перейдите на противоположную сторону — кадр 2. Если вокруг ходят люди, снимите ещё
-   несколько кадров: чем больше, тем больше шансов, что каждое место хоть на одном кадре пустое.
-3. Перетащите фото в окно (сразу все) или нажмите на поле «Добавить 360° фото» вверху. Добавленные фото видны
-   внизу: щелчок показывает фото, ✕ убирает его из списка, «Очистить список» — все.
-4. Для двух фото: если человек остался, нажмите «Поменять зоны» (клавиша S).
-5. Выберите размер и качество и сохраните результат.
+- **No AI, nothing made up.** Only real pixels from your own shots, at their original sharpness.
+- **Stays a 360° photo.** XMP GPano, EXIF and the ICC profile are carried over, so Google Photos, Facebook, VR
+  headsets and Insta360 Studio open the result as a sphere.
+- **What you see is what you save.** The saved file matches the preview exactly.
+- **8 interface languages**: English, Русский, Español, Português, Deutsch, Français, 中文, 日本語.
 
-Лучше всего работает, когда между кадрами ничего не менялось, кроме людей: одинаковая экспозиция (ручной режим),
-нет ветра.
+## 📦 Install
 
-## Вес файла
+Download the latest version from [**Releases**](https://github.com/DeMoZ/360cleaner/releases/latest).
 
-16K-панорама с камеры (15520×7760) весит около 23 МБ. Почти весь вес — пиксели: при просмотре 360° на экране
-видна примерно четверть окружности, поэтому для чёткой картинки на весь экран хватает 6K–8K. Пример на такой
-панораме:
+<details open>
+<summary><b>macOS</b> (Apple Silicon)</summary>
 
-| Размер | Качество | Вес |
-| :--- | :--- | :--- |
-| исходный 15520×7760 | 95 | 22 МБ |
-| исходный 15520×7760 | 85 | 7,2 МБ |
-| 8K, 8192×4096 | 85 | 2,5 МБ |
-| 6K, 6144×3072 | 85 | 1,6 МБ |
-| 5K, 5120×2560 | 80 | 1,0 МБ |
-| 4K, 4096×2048 | 80 | 0,7 МБ |
+1. Open `360Cleaner-macOS-v….dmg` and drag the app to **Applications**.
+2. The app isn't signed with an Apple certificate, so macOS blocks the first launch: click **Done**, open
+   **System Settings → Privacy & Security** and click **Open Anyway**.
 
-Уменьшение — Lanczos; JPEG с оптимизированными таблицами и прогрессивной записью, цвет 4:2:0 (от качества 95 —
-4:4:4). Размеры в метаданных GPano пересчитываются под новый размер.
+The `…-macos-arm64.zip` file in the release is for in-app updates; you don't need to download it.
+</details>
 
-## Параметры
+<details open>
+<summary><b>Windows</b> 10 / 11</summary>
 
-| Параметр | Что делает |
+1. Unzip `360Cleaner-…-windows-x64.zip` and run `360Cleaner.exe`.
+2. SmartScreen: **More info → Run anyway**.
+
+It needs Microsoft Edge WebView2, which Windows 10/11 usually already has.
+</details>
+
+After that the app updates itself: the version button in the top-right corner, plus an automatic check once a day
+(you can turn it off).
+
+## 📸 How to shoot
+
+1. Put the camera on a **tripod**. Shot 1: stand on one side.
+2. Without moving the tripod, go to the **opposite side** and take shot 2. If people are walking around, take a few
+   more: the more shots, the better the chance that every spot is empty in at least one of them.
+3. **Drop the photos** into the window (all at once), or click the field at the top. They appear in the list at the
+   bottom: click one to view it, ✕ removes it, **Clear list** removes all.
+4. With two photos, if you're still in the picture, press **Swap zones** (key <kbd>S</kbd>).
+5. Pick the **size** and **quality**, then **Save 360°**.
+
+> [!TIP]
+> It works best when nothing changes between shots except people: fixed exposure (manual mode), no wind.
+
+## 🪶 File size
+
+A 16K panorama straight from the camera (15520×7760) weighs about 23 MB. Almost all of it is pixels. A 360° viewer
+shows about a quarter of the circle on screen at a time, so **6K–8K is enough for a sharp full-screen view**.
+
+| Size | Quality | File |
+| :--- | :---: | ---: |
+| Original, 15520×7760 | 95 | 22 MB |
+| Original, 15520×7760 | 85 | 7.2 MB |
+| 8K, 8192×4096 | 85 | **2.5 MB** |
+| 6K, 6144×3072 | 85 | **1.6 MB** |
+| 5K, 5120×2560 | 80 | **1.0 MB** |
+| 4K, 4096×2048 | 80 | **0.7 MB** |
+
+The app downscales with Lanczos and writes a progressive JPEG with optimized tables and 4:2:0 color (4:4:4 at
+quality 95 and up). The panorama sizes in the GPano metadata are updated to match.
+
+## 🎛 Settings
+
+| Setting | What it does |
 | :--- | :--- |
-| **Порог различий** | Насколько сильно должны различаться кадры (ΔE в Lab). Понизьте, если одежда похожа по цвету на фон; повысьте, если реагирует на листья и шум. |
-| **Захват силуэта и тени** | На сколько расширить найденную область: волосы, края одежды, тень на полу. |
-| **Смягчение шва** | Ширина плавного перехода между кадрами. |
-| **Поменять зоны** | Только для двух фото: меняет, из какого кадра берётся каждая из двух зон. |
-| **Карта различий** | Для двух фото — голубая зона A и красная зона B, где программа увидела людей. Для трёх и больше — цвет кадра (как точка у фото внизу), из которого взято место. |
-| **Размер, качество JPEG** | С чем сохранить результат. Увеличения нет: размеры больше исходного не предлагаются. |
-| **360° сфера** | Интерактивный просмотр: тяните мышью, колесо — масштаб. Пробел — переключить. |
-| **Кадрирование** | Рамка 2:1, 16:9, 4:3, 1:1, 9:16, 4:5 — только для просмотра. |
+| **Difference threshold** | How different the shots must be (ΔE in Lab). Lower it if clothes match the background; raise it if leaves and noise get caught. |
+| **Silhouette and shadow** | How far to grow the found area: hair, clothing edges, the shadow on the floor. |
+| **Seam softness** | Width of the smooth blend between shots. |
+| **Swap zones** | Two photos only: swaps which shot each of the two zones comes from. |
+| **Difference map** | Two photos: blue zone A and red zone B, where people were found. Three or more: each area in the color of the shot it was taken from (the same dot as in the photo list). |
+| **Size, JPEG quality** | How to save the result. No upscaling: sizes larger than the original aren't offered. |
+| **360° sphere** | Interactive view: drag with the mouse, scroll to zoom. <kbd>Space</kbd> toggles it. |
+| **Aspect ratio** | 2:1, 16:9, 4:3, 1:1, 9:16 or 4:5 frame, for viewing only. |
 
-Сохранённый файл совпадает с превью: маски считаются по превью и растягиваются до размера результата.
+**Keys:** <kbd>1</kbd> result · <kbd>2</kbd> difference map · <kbd>3</kbd>–<kbd>9</kbd> photos · <kbd>S</kbd> swap
+zones · <kbd>Space</kbd> 360° · <kbd>⌘/Ctrl</kbd>+<kbd>O</kbd> add photos · <kbd>⌘/Ctrl</kbd>+<kbd>S</kbd> save
 
-## Сборка из исходников
+## 🛠 Build from source
+
+Rust + the system WebView (tao + wry), parallel processing with Rayon.
 
 ```bash
-cargo run --release                 # запуск
-cargo test                          # тесты
-scripts/build-macos.sh              # dist/360Cleaner.app, .dmg и .zip для обновления (Mac, Apple Silicon)
+cargo run --release                         # run
+cargo run --release -- a.jpg b.jpg c.jpg    # run with photos
+cargo test                                  # tests
+scripts/build-macos.sh                      # dist/360Cleaner.app, .dmg and the update .zip (Apple Silicon)
 ```
 
-Можно передать фото в командной строке: `cargo run --release -- a.jpg b.jpg c.jpg`.
+## ❤️ Support
 
-## Поддержать
-
-Программа бесплатная. Кнопка «Поддержать» в окне ведёт на способы доната; список берётся из
+The app is free. The **Support** button in the window lists ways to donate; the list comes from
 [DeMoZ/donations](https://github.com/DeMoZ/donations).
 
-## Лицензия
+## 📄 License
 
-MIT.
+[MIT](LICENSE).

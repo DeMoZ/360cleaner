@@ -20,6 +20,7 @@ Thumbs.db
 *.png
 !assets/*.jpg
 !assets/*.png
+!docs/*.png
 
 # IDE
 .idea/
