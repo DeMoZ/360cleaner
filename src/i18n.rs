@@ -22,8 +22,7 @@ pub fn resolve(setting: &str) -> &'static str {
 
 #[derive(Clone, Copy)]
 pub enum Text {
-    PickFirst,
-    PickSecond,
+    PickPhotos,
     Photos,
     SaveTitle,
 }
@@ -31,36 +30,28 @@ pub enum Text {
 pub fn tr(lang: &str, text: Text) -> &'static str {
     use Text::*;
     match (lang, text) {
-        ("ru", PickFirst) => "Выберите первое 360° фото",
-        ("ru", PickSecond) => "Выберите второе 360° фото",
+        ("ru", PickPhotos) => "Выберите 360° фото с одной точки",
         ("ru", Photos) => "360° фото",
         ("ru", SaveTitle) => "Сохранить чистую 360° панораму",
-        ("es", PickFirst) => "Elige la primera foto 360°",
-        ("es", PickSecond) => "Elige la segunda foto 360°",
+        ("es", PickPhotos) => "Elige fotos 360° tomadas desde el mismo punto",
         ("es", Photos) => "Fotos 360°",
         ("es", SaveTitle) => "Guardar la panorámica 360° limpia",
-        ("pt", PickFirst) => "Escolha a primeira foto 360°",
-        ("pt", PickSecond) => "Escolha a segunda foto 360°",
+        ("pt", PickPhotos) => "Escolha fotos 360° tiradas do mesmo ponto",
         ("pt", Photos) => "Fotos 360°",
         ("pt", SaveTitle) => "Salvar o panorama 360° limpo",
-        ("de", PickFirst) => "Erstes 360°-Foto auswählen",
-        ("de", PickSecond) => "Zweites 360°-Foto auswählen",
+        ("de", PickPhotos) => "360°-Fotos vom selben Standort auswählen",
         ("de", Photos) => "360°-Fotos",
         ("de", SaveTitle) => "Bereinigtes 360°-Panorama speichern",
-        ("fr", PickFirst) => "Choisissez la première photo 360°",
-        ("fr", PickSecond) => "Choisissez la deuxième photo 360°",
+        ("fr", PickPhotos) => "Choisissez des photos 360° prises du même endroit",
         ("fr", Photos) => "Photos 360°",
         ("fr", SaveTitle) => "Enregistrer le panorama 360° nettoyé",
-        ("zh", PickFirst) => "选择第一张 360° 照片",
-        ("zh", PickSecond) => "选择第二张 360° 照片",
+        ("zh", PickPhotos) => "选择在同一位置拍摄的 360° 照片",
         ("zh", Photos) => "360° 照片",
         ("zh", SaveTitle) => "保存清理后的 360° 全景图",
-        ("ja", PickFirst) => "1 枚目の 360° 写真を選択",
-        ("ja", PickSecond) => "2 枚目の 360° 写真を選択",
+        ("ja", PickPhotos) => "同じ場所で撮った 360° 写真を選択",
         ("ja", Photos) => "360° 写真",
         ("ja", SaveTitle) => "人物を消した 360° パノラマを保存",
-        (_, PickFirst) => "Choose the first 360° photo",
-        (_, PickSecond) => "Choose the second 360° photo",
+        (_, PickPhotos) => "Choose 360° photos taken from the same spot",
         (_, Photos) => "360° photos",
         (_, SaveTitle) => "Save the clean 360° panorama",
     }
@@ -86,7 +77,7 @@ mod tests {
     #[test]
     fn every_language_has_texts() {
         for l in LANGUAGES {
-            for t in [Text::PickFirst, Text::PickSecond, Text::Photos, Text::SaveTitle] {
+            for t in [Text::PickPhotos, Text::Photos, Text::SaveTitle] {
                 assert!(!tr(l, t).is_empty());
             }
         }

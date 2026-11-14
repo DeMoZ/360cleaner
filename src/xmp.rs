@@ -55,6 +55,76 @@ pub fn inject_markers(jpeg: &[u8], markers: &[Vec<u8>]) -> Vec<u8> {
     out
 }
 
+const XMP_NS: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
+
+/// Размеры GPano в пикселях и направление: true — по ширине.
+const GPANO_PIXELS: [(&str, bool); 6] = [
+    ("FullPanoWidthPixels", true),
+    ("CroppedAreaImageWidthPixels", true),
+    ("CroppedAreaLeftPixels", true),
+    ("FullPanoHeightPixels", false),
+    ("CroppedAreaImageHeightPixels", false),
+    ("CroppedAreaTopPixels", false),
+];
+
+/// Пересчитывает размеры GPano в XMP после уменьшения кадра `from` → `to`: иначе просмотрщики 360° ждут исходный
+/// размер и показывают панораму неправильно. Остальные сегменты не меняются.
+pub fn scale_gpano(markers: Vec<Vec<u8>>, from: (u32, u32), to: (u32, u32)) -> Vec<Vec<u8>> {
+    if from == to || from.0 == 0 || from.1 == 0 {
+        return markers;
+    }
+    markers.into_iter().map(|seg| scale_segment(&seg, from, to).unwrap_or(seg)).collect()
+}
+
+fn scale_segment(seg: &[u8], from: (u32, u32), to: (u32, u32)) -> Option<Vec<u8>> {
+    if seg.len() < 4 || seg[1] != 0xE1 || !seg[4..].starts_with(XMP_NS) {
+        return None;
+    }
+    let body = std::str::from_utf8(&seg[4 + XMP_NS.len()..]).ok()?;
+    let mut text = body.to_string();
+    for (key, horizontal) in GPANO_PIXELS {
+        let (num, den) = if horizontal { (to.0, from.0) } else { (to.1, from.1) };
+        let scale = |v: u64| (v * num as u64 + den as u64 / 2) / den as u64;
+        text = replace_numbers(&text, &format!("GPano:{key}"), scale);
+    }
+    if text == body {
+        return None;
+    }
+    let len = 2 + XMP_NS.len() + text.len();
+    if len > 0xFFFF {
+        return None;
+    }
+    let mut out = vec![0xFF, 0xE1, (len >> 8) as u8, len as u8];
+    out.extend_from_slice(XMP_NS);
+    out.extend_from_slice(text.as_bytes());
+    Some(out)
+}
+
+/// Заменяет число после `key` в обеих записях XMP: атрибутом `key="123"` и элементом `<key>123</key>`.
+fn replace_numbers(text: &str, key: &str, f: impl Fn(u64) -> u64) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find(key) {
+        let after = &rest[i + key.len()..];
+        out.push_str(&rest[..i + key.len()]);
+        rest = after;
+        let open = if after.starts_with("=\"") || after.starts_with("='") {
+            2
+        } else if after.starts_with('>') {
+            1
+        } else {
+            continue;
+        };
+        let digits = after[open..].bytes().take_while(u8::is_ascii_digit).count();
+        let Ok(value) = after[open..open + digits].parse::<u64>() else { continue };
+        out.push_str(&after[..open]);
+        out.push_str(&f(value).to_string());
+        rest = &after[open + digits..];
+    }
+    out.push_str(rest);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +160,24 @@ mod tests {
         expected.extend(&icc);
         expected.extend([0xFF, 0xDB, 0, 2, 0xFF, 0xD9]);
         assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn scales_gpano_sizes() {
+        let xmp = |w: u32, h: u32| {
+            let body = format!(
+                "<rdf:Description GPano:ProjectionType=\"equirectangular\" GPano:FullPanoWidthPixels=\"{w}\" \
+                 GPano:CroppedAreaTopPixels='0'><GPano:FullPanoHeightPixels>{h}</GPano:FullPanoHeightPixels>\
+                 <GPano:CroppedAreaImageWidthPixels>{w}</GPano:CroppedAreaImageWidthPixels></rdf:Description>"
+            );
+            let mut payload = XMP_NS.to_vec();
+            payload.extend(body.as_bytes());
+            seg(0xE1, &payload)
+        };
+        let exif = seg(0xE1, b"Exif\0\0MM 15520");
+        let out = scale_gpano(vec![xmp(15520, 7760), exif.clone()], (15520, 7760), (8192, 4096));
+        assert_eq!(out, vec![xmp(8192, 4096), exif.clone()]);
+        assert_eq!(scale_gpano(vec![exif.clone()], (100, 50), (100, 50)), vec![exif]);
     }
 
     #[test]

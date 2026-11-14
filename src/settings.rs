@@ -15,7 +15,14 @@ pub struct Settings {
     pub threshold: f32,
     pub dilate: i32,
     pub feather: i32,
+    /// Ширина сохранённой панорамы; 0 — исходная.
+    pub export_width: u32,
+    /// Качество JPEG при сохранении.
+    pub export_quality: u8,
 }
+
+/// Ниже этого качества JPEG панорама заметно портится.
+pub const MIN_QUALITY: u8 = 50;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -28,6 +35,8 @@ impl Default for Settings {
             threshold: p.threshold,
             dilate: p.dilate,
             feather: p.feather,
+            export_width: 0,
+            export_quality: 85,
         }
     }
 }

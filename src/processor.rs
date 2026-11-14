@@ -1,7 +1,10 @@
-//! Обработка: две равнопромежуточные (equirectangular) 360° панорамы с одной точки → одна без человека.
+//! Обработка: равнопромежуточные (equirectangular) 360° панорамы с одной точки → одна без людей.
 //! Классическое компьютерное зрение без нейросетей, параллельно через Rayon.
 //!
-//! Шаги: разница в цветовом пространстве Lab → порог → убрать одиночные точки шума → расширить маску кругом
+//! Два кадра (`compute_preview`) — фотограф на каждом в своём месте; три и больше (`compute_stack_preview`) —
+//! прохожие, фон берётся как медиана кадров.
+//!
+//! Шаги для двух кадров: разница в цветовом пространстве Lab → порог → убрать одиночные точки шума → расширить маску кругом
 //! (по горизонтали панорама замкнута) → два угловых кластера на окружности (где стоял человек на каждом кадре) →
 //! мягкая маска «брать пиксель из второго кадра» → смешивание.
 //!
@@ -328,10 +331,8 @@ pub struct Preview {
 pub fn compute_preview(img1: &RgbImage, img2: &RgbImage, p: Params) -> Preview {
     let (w, h) = img1.dimensions();
     let diff = compute_difference_map(img1, img2);
-    let raw: Vec<bool> = diff.iter().map(|&d| d > p.threshold).collect();
     // одиночные точки (шум JPEG, листья) не должны раздуваться расширением
-    let opened = dilate_mask_360(&erode_mask_360(&raw, w, h, 1), w, h, 1);
-    let mask = dilate_mask_360(&opened, w, h, p.dilate);
+    let mask = changed_mask(&diff, w, h, p);
     let angles = find_cluster_angles(&mask, w, h);
     let target = target_mask(&mask, w, angles, p.swap);
     let alpha = Alpha { w, h, data: feather_alpha(&target, w, h, p.feather) };
@@ -363,6 +364,131 @@ pub fn blend_into(base: &mut RgbImage, img2: &RgbImage, alpha: &Alpha) {
             }
         }
     });
+}
+
+// ---------------------------------------------------------------- три кадра и больше
+
+/// Цвета кадров на карте различий (и у фото в списке окна): кадр `i` — `SOURCE_COLORS[i % len]`.
+pub const SOURCE_COLORS: [[u8; 3]; 8] = [
+    [56, 189, 248],
+    [239, 68, 68],
+    [16, 185, 129],
+    [245, 158, 11],
+    [139, 92, 246],
+    [236, 72, 153],
+    [234, 179, 8],
+    [20, 184, 166],
+];
+
+/// Медиана по кадрам для каждого канала каждого пикселя: то, что видно на большинстве кадров (фон без прохожих).
+pub fn median_image(frames: &[RgbImage]) -> RgbImage {
+    let (w, h) = frames[0].dimensions();
+    let n = frames.len();
+    let row_len = w as usize * 3;
+    let mut out = RgbImage::new(w, h);
+    out.par_chunks_mut(row_len).enumerate().for_each(|(y, row)| {
+        let mut values = vec![0u8; n];
+        let base = y * row_len;
+        for (i, o) in row.iter_mut().enumerate() {
+            for (v, f) in values.iter_mut().zip(frames) {
+                *v = f.as_raw()[base + i];
+            }
+            values.sort_unstable();
+            *o = if n % 2 == 1 {
+                values[n / 2]
+            } else {
+                (values[n / 2 - 1] as u16 + values[n / 2] as u16).div_ceil(2) as u8
+            };
+        }
+    });
+    out
+}
+
+/// Маска различий одного кадра с фоном: порог, удаление точек шума, расширение.
+fn changed_mask(diff: &[f32], w: u32, h: u32, p: Params) -> Vec<bool> {
+    let raw: Vec<bool> = diff.iter().map(|&d| d > p.threshold).collect();
+    let opened = dilate_mask_360(&erode_mask_360(&raw, w, h, 1), w, h, 1);
+    dilate_mask_360(&opened, w, h, p.dilate)
+}
+
+/// Маски «взять кадр i» для `blend_sequence`: из долей кадров `weights` (в каждой точке сумма 1).
+/// После смешивания кадров 1..=i по очереди доли совпадают с `weights`.
+fn sequential_alphas(weights: &[Vec<f32>], w: u32, h: u32) -> Vec<Alpha> {
+    let mut sum = weights[0].clone();
+    weights[1..]
+        .iter()
+        .map(|wi| {
+            let data = sum
+                .iter_mut()
+                .zip(wi)
+                .map(|(s, &v)| {
+                    *s += v;
+                    if *s > 1e-6 { (v / *s).clamp(0.0, 1.0) } else { 0.0 }
+                })
+                .collect();
+            Alpha { w, h, data }
+        })
+        .collect()
+}
+
+/// Смешивает в `base` (кадр 0) кадры 1.. по их маскам из `compute_stack_preview` / `compute_preview`.
+pub fn blend_sequence(base: &mut RgbImage, others: &[RgbImage], alphas: &[Alpha]) {
+    for (img, alpha) in others.iter().zip(alphas) {
+        blend_into(base, img, alpha);
+    }
+}
+
+pub struct StackPreview {
+    pub result: RgbImage,
+    pub mask_vis: RgbImage,
+    /// Маски кадров 1.. для `blend_sequence`.
+    pub alphas: Vec<Alpha>,
+    /// Доля пикселей, где хоть один кадр отличается от фона.
+    pub changed: f32,
+}
+
+/// Расчёт для трёх кадров и больше (все одного размера). Фон — медиана кадров; на каждом кадре отмечается, где он
+/// отличается от фона (там прохожий). В каждой точке берётся первый по списку кадр, где там чисто, а если чисто
+/// нигде — самый близкий к фону. Границы между кадрами смягчаются.
+pub fn compute_stack_preview(frames: &[RgbImage], p: Params) -> StackPreview {
+    let (w, h) = frames[0].dimensions();
+    let n = frames.len();
+    let median = median_image(frames);
+    let per_frame: Vec<(Vec<f32>, Vec<bool>)> = frames
+        .iter()
+        .map(|f| {
+            let diff = compute_difference_map(f, &median);
+            let mask = changed_mask(&diff, w, h, p);
+            (diff, mask)
+        })
+        .collect();
+    let len = (w * h) as usize;
+    let labels: Vec<u8> = (0..len)
+        .into_par_iter()
+        .map(|i| {
+            let clean = per_frame.iter().position(|(_, m)| !m[i]);
+            clean
+                .unwrap_or_else(|| (0..n).min_by(|&a, &b| per_frame[a].0[i].total_cmp(&per_frame[b].0[i])).unwrap_or(0))
+                as u8
+        })
+        .collect();
+    let weights: Vec<Vec<f32>> = (0..n)
+        .map(|k| {
+            let own: Vec<bool> = labels.iter().map(|&l| l as usize == k).collect();
+            feather_alpha(&own, w, h, p.feather)
+        })
+        .collect();
+    let alphas = sequential_alphas(&weights, w, h);
+    let mut result = frames[0].clone();
+    blend_sequence(&mut result, &frames[1..], &alphas);
+
+    let any: Vec<bool> = (0..len).map(|i| per_frame.iter().any(|(_, m)| m[i])).collect();
+    let changed = any.iter().filter(|&&m| m).count() as f32 / len.max(1) as f32;
+    let mut mask_vis = RgbImage::new(w, h);
+    for (i, px) in mask_vis.pixels_mut().enumerate() {
+        px.0 = if any[i] { SOURCE_COLORS[labels[i] as usize % SOURCE_COLORS.len()] } else { [15, 23, 42] };
+    }
+    StackPreview { result, mask_vis, alphas, changed }
 }
 
 /// Карта различий: зона A — голубая, зона B — красная.
@@ -498,6 +624,46 @@ mod tests {
         blend_into(&mut swapped, &img2, &compute_preview(&small1, &small2, Params { swap: true, ..p }).alpha);
         let best = max_err(&full, &truth).min(max_err(&swapped, &truth));
         assert!(best <= 3, "full-size export differs from preview logic, max error {best}");
+    }
+
+    #[test]
+    fn stack_removes_passers_by() {
+        let (w, h) = (400u32, 200u32);
+        // на каждом кадре прохожий в своём месте, один — через шов панорамы
+        let frames: Vec<RgbImage> = [60, 180, 300, 390].iter().map(|&x| scene(w, h, x)).collect();
+        let p = Params { dilate: 6, feather: 3, ..Params::default() };
+        let s = compute_stack_preview(&frames, p);
+        let err = max_err(&s.result, &clean(w, h));
+        assert!(err <= 3, "passers-by left in the result, max error {err}");
+        assert!(s.changed > 0.0 && s.changed < 0.5, "changed {}", s.changed);
+
+        // экспорт по растянутым маскам совпадает с превью
+        let big: Vec<RgbImage> = [60, 180, 300, 390].iter().map(|&x| scene(w * 2, h * 2, x * 2)).collect();
+        let small: Vec<RgbImage> = big.iter().map(|f| downscale(f.clone(), w)).collect();
+        let s = compute_stack_preview(&small, p);
+        let mut full = big[0].clone();
+        blend_sequence(&mut full, &big[1..], &s.alphas);
+        let err = max_err(&full, &clean(w * 2, h * 2));
+        assert!(err <= 4, "full-size stack differs, max error {err}");
+    }
+
+    #[test]
+    fn sequential_alphas_reproduce_weights() {
+        let weights = vec![vec![0.5, 0.0, 0.2], vec![0.25, 0.0, 0.0], vec![0.25, 1.0, 0.8]];
+        let alphas = sequential_alphas(&weights, 3, 1);
+        // три «кадра» с яркостью 0, 100, 200 → итог Σ weight·яркость
+        let frame = |v: u8| RgbImage::from_pixel(3, 1, image::Rgb([v, v, v]));
+        let mut base = frame(0);
+        blend_sequence(&mut base, &[frame(100), frame(200)], &alphas);
+        let got: Vec<u8> = base.pixels().map(|p| p[0]).collect();
+        assert_eq!(got, vec![75, 200, 160]);
+    }
+
+    #[test]
+    fn median_of_frames() {
+        let f = |v: u8| RgbImage::from_pixel(2, 1, image::Rgb([v, v, 255 - v]));
+        assert_eq!(median_image(&[f(10), f(200), f(30)]).get_pixel(0, 0).0, [30, 30, 225]);
+        assert_eq!(median_image(&[f(10), f(20), f(30), f(250)]).get_pixel(1, 0).0, [25, 25, 230]);
     }
 
     #[test]
