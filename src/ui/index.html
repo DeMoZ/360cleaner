@@ -599,11 +599,100 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+
+/* ── Header actions (update / donate) ───────────────────── */
+.header-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.icon-btn {
+  display: flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 11px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px; font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+.icon-btn:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.icon-btn.donate:hover { border-color: rgba(236,72,153,0.5); color: #f472b6; }
+.icon-btn.has-update { border-color: rgba(59,130,246,0.6); color: var(--accent-blue); background: rgba(59,130,246,0.1); }
+.icon-btn .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-blue); display: none; }
+.icon-btn.has-update .dot { display: block; }
+
+.drop-card.loading .drop-name { color: var(--accent-orange); }
+body.drag-on .drop-card { border-color: var(--accent-blue); background: rgba(59,130,246,0.08); box-shadow: var(--glow-blue); }
+body.drag-bad .drop-card { border-color: rgba(239,68,68,0.6); }
+.drop-size { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+
+.btn:disabled { opacity: 0.4; cursor: default; transform: none !important; box-shadow: none !important; }
+.swap-state { font-size: 10px; color: var(--text-muted); text-align: center; margin-top: -4px; }
+.hint { font-size: 10px; line-height: 1.5; color: var(--text-muted); }
+.btn-small { padding: 6px 10px; font-size: 11px; width: auto; }
+
+/* ── Toasts ─────────────────────────────────────────────── */
+.toasts { position: fixed; right: 16px; bottom: 40px; display: flex; flex-direction: column; gap: 8px; z-index: 200; max-width: 420px; }
+.toast {
+  background: #111a2b; border: 1px solid var(--border); border-left: 3px solid var(--accent-emerald);
+  border-radius: var(--radius-md); padding: 10px 12px; color: var(--text-primary); font-size: 12px; line-height: 1.5;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.5); display: flex; gap: 10px; align-items: flex-start;
+  animation: toast-in 0.2s ease;
+  -webkit-user-select: text; user-select: text;
+}
+.toast.err { border-left-color: #ef4444; }
+.toast.warn { border-left-color: var(--accent-orange); }
+.toast .t-body { flex: 1; word-break: break-word; }
+.toast .t-actions { display: flex; gap: 6px; margin-top: 6px; }
+.toast .t-close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; line-height: 1; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* ── Modals ─────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(3,6,12,0.7); backdrop-filter: blur(6px);
+  display: none; align-items: center; justify-content: center; z-index: 150; padding: 24px;
+}
+.modal-backdrop.open { display: flex; }
+.modal {
+  width: 480px; max-width: 100%; max-height: 100%; overflow-y: auto;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 22px; box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.modal-head { display: flex; align-items: center; gap: 12px; }
+.modal-icon { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+.modal-icon.pink { background: rgba(236,72,153,0.15); color: #f472b6; }
+.modal-icon.blue { background: rgba(59,130,246,0.15); color: var(--accent-blue); }
+.modal-title { font-size: 16px; font-weight: 700; flex: 1; }
+.modal-close { background: none; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; }
+.modal-text { font-size: 12.5px; line-height: 1.6; color: var(--text-secondary); -webkit-user-select: text; user-select: text; }
+.modal-faint { font-size: 11px; color: var(--text-muted); }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.modal-actions .btn { width: auto; }
+.method {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  background: var(--bg-card2); border: 1px solid var(--border); border-radius: var(--radius-md);
+  cursor: pointer; transition: all var(--transition); text-align: left; color: inherit; width: 100%;
+}
+.method:hover { border-color: rgba(236,72,153,0.5); background: rgba(236,72,153,0.05); }
+.method-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.method-desc { font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); margin-top: 2px; }
+.method-arrow { margin-left: auto; color: #f472b6; flex-shrink: 0; }
+.notes {
+  background: var(--bg-base); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 12px; font-size: 12px; line-height: 1.6; color: var(--text-secondary);
+  white-space: pre-wrap; max-height: 200px; overflow-y: auto; -webkit-user-select: text; user-select: text;
+}
+.check { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+.status-line { font-size: 12px; }
+.status-line.ok { color: var(--accent-emerald); }
+.status-line.err { color: #f87171; }
+.status-line.new { color: var(--accent-blue); }
+.spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.1); border-top-color: currentColor; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; vertical-align: -2px; }
 </style>
 </head>
 <body>
 
-<!-- ══ Top Header Bar ══════════════════════════════════════ -->
+<!-- ══ Верхняя панель ══════════════════════════════════════ -->
 <div class="header">
   <div class="logo">
     <div class="logo-icon">🌐</div>
@@ -614,18 +703,12 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); }
   <div class="header-sep"></div>
 
   <div class="drop-row">
-    <!-- Drop Card 1 -->
-    <div class="drop-card" id="dz1"
-         onclick="sendToRust('pick_file_1')"
-         ondragover="onDragOver(event,'dz1')"
-         ondragleave="onDragLeave('dz1')"
-         ondrop="onDrop(event)">
-      <div class="drop-thumb" id="thumb1">
-        <span class="placeholder-icon">📷</span>
-      </div>
+    <div class="drop-card" id="dz0" onclick="send('pick',{slot:0})" title="Нажмите или перетащите фото">
+      <div class="drop-thumb" id="thumb0"><span class="placeholder-icon">📷</span></div>
       <div class="drop-info">
-        <div class="drop-label">Фото 1 · Позиция A</div>
-        <div class="drop-name" id="f1name">Перетащите или нажмите для выбора</div>
+        <div class="drop-label">Фото 1</div>
+        <div class="drop-name" id="name0">Перетащите или нажмите для выбора</div>
+        <div class="drop-size" id="size0"></div>
       </div>
       <div class="drop-action">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -633,18 +716,12 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); }
       </div>
     </div>
 
-    <!-- Drop Card 2 -->
-    <div class="drop-card" id="dz2"
-         onclick="sendToRust('pick_file_2')"
-         ondragover="onDragOver(event,'dz2')"
-         ondragleave="onDragLeave('dz2')"
-         ondrop="onDrop(event)">
-      <div class="drop-thumb" id="thumb2">
-        <span class="placeholder-icon">📷</span>
-      </div>
+    <div class="drop-card" id="dz1" onclick="send('pick',{slot:1})" title="Нажмите или перетащите фото">
+      <div class="drop-thumb" id="thumb1"><span class="placeholder-icon">📷</span></div>
       <div class="drop-info">
-        <div class="drop-label">Фото 2 · Позиция B</div>
-        <div class="drop-name" id="f2name">Перетащите или нажмите для выбора</div>
+        <div class="drop-label">Фото 2</div>
+        <div class="drop-name" id="name1">Перетащите или нажмите для выбора</div>
+        <div class="drop-size" id="size1"></div>
       </div>
       <div class="drop-action">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -652,56 +729,66 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); }
       </div>
     </div>
   </div>
+
+  <div class="header-sep"></div>
+
+  <div class="header-actions">
+    <button class="icon-btn" id="updBtn" onclick="openUpdates()" title="Обновления">
+      <span class="dot"></span>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="16,12 12,8 8,12"/><line x1="12" y1="16" x2="12" y2="8"/></svg>
+      <span id="updLabel">v…</span>
+    </button>
+    <button class="icon-btn donate" onclick="openDonate()" title="Поддержать разработку">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      Поддержать
+    </button>
+  </div>
 </div>
 
-<!-- ══ Main Area ═══════════════════════════════════════════ -->
+<!-- ══ Основная часть ═══════════════════════════════════════ -->
 <div class="app-body">
 
-  <!-- Left Sidebar -->
   <div class="sidebar">
 
-    <!-- Processing params -->
     <div class="sidebar-section">
       <div class="section-label">Параметры обнаружения</div>
 
-      <div class="slider-block">
+      <div class="slider-block" title="Насколько сильно должны различаться кадры. Меньше — ловит людей в одежде цвета фона, больше — не реагирует на колышущиеся листья.">
         <div class="slider-row">
-          <span class="slider-name">Чувствительность</span>
-          <span class="slider-val" id="v_th">24</span>
+          <span class="slider-name">Порог различий</span>
+          <span class="slider-val" id="v_threshold">24</span>
         </div>
-        <input type="range" id="threshold" min="5" max="60" value="24"
-               oninput="syncSlider('threshold','v_th','');triggerCompute();">
+        <input type="range" id="threshold" min="5" max="60" value="24" oninput="onSlider()">
       </div>
 
-      <div class="slider-block">
+      <div class="slider-block" title="На сколько расширить найденную область, чтобы захватить волосы, края одежды и тень.">
         <div class="slider-row">
-          <span class="slider-name">Захват силуэта</span>
-          <span class="slider-val" id="v_dil">25 px</span>
+          <span class="slider-name">Захват силуэта и тени</span>
+          <span class="slider-val" id="v_dilate">25 px</span>
         </div>
-        <input type="range" id="dilate" min="5" max="60" value="25"
-               oninput="syncSlider('dilate','v_dil',' px');triggerCompute();">
+        <input type="range" id="dilate" min="5" max="60" value="25" oninput="onSlider()">
       </div>
 
-      <div class="slider-block">
+      <div class="slider-block" title="Ширина плавного перехода между кадрами.">
         <div class="slider-row">
           <span class="slider-name">Смягчение шва</span>
-          <span class="slider-val" id="v_fea">20 px</span>
+          <span class="slider-val" id="v_feather">20 px</span>
         </div>
-        <input type="range" id="feather" min="2" max="50" value="20"
-               oninput="syncSlider('feather','v_fea',' px');triggerCompute();">
+        <input type="range" id="feather" min="2" max="50" value="20" oninput="onSlider()">
       </div>
+      <button class="btn btn-ghost btn-small" onclick="resetParams()">Сбросить параметры</button>
     </div>
 
     <div class="divider"></div>
 
-    <!-- Actions -->
     <div class="sidebar-section">
       <div class="section-label">Действия</div>
-      <button class="btn btn-violet" onclick="toggleSwap()">
+      <button class="btn btn-violet" id="swapBtn" onclick="toggleSwap()" disabled>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17,1 21,5 17,9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7,23 3,19 7,15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
         Поменять зоны
       </button>
-      <button class="btn btn-emerald" onclick="sendToRust('save_file')">
+      <div class="swap-state" id="swapState">Человек остался? Поменяйте зоны.</div>
+      <button class="btn btn-emerald" id="saveBtn" onclick="send('save')" disabled>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
         Сохранить 360°
       </button>
@@ -709,74 +796,53 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); }
 
     <div class="divider"></div>
 
-    <!-- View Tabs -->
     <div class="sidebar-section">
-      <div class="section-label">Режим просмотра</div>
+      <div class="section-label">Что показать</div>
       <div class="view-tabs" id="viewTabs">
-        <button class="tab-btn active" onclick="switchTab('result',this)">
-          <span class="tab-dot" style="background:var(--accent-emerald)"></span>
-          Результат — Без человека
+        <button class="tab-btn active" data-tab="result" onclick="switchTab('result')">
+          <span class="tab-dot" style="background:var(--accent-emerald)"></span>Результат
         </button>
-        <button class="tab-btn" onclick="switchTab('mask',this)">
-          <span class="tab-dot" style="background:var(--accent-blue)"></span>
-          Карта различий
+        <button class="tab-btn" data-tab="mask" onclick="switchTab('mask')">
+          <span class="tab-dot" style="background:var(--accent-blue)"></span>Карта различий
         </button>
-        <button class="tab-btn" onclick="switchTab('photo1',this)">
-          <span class="tab-dot" style="background:var(--accent-cyan)"></span>
-          Фото 1 (исходник)
+        <button class="tab-btn" data-tab="photo0" onclick="switchTab('photo0')">
+          <span class="tab-dot" style="background:var(--accent-cyan)"></span>Фото 1
         </button>
-        <button class="tab-btn" onclick="switchTab('photo2',this)">
-          <span class="tab-dot" style="background:var(--accent-violet)"></span>
-          Фото 2 (исходник)
+        <button class="tab-btn" data-tab="photo1" onclick="switchTab('photo1')">
+          <span class="tab-dot" style="background:var(--accent-violet)"></span>Фото 2
         </button>
       </div>
+      <div class="hint">Клавиши 1–4 — вкладки, S — поменять зоны, пробел — 360°.</div>
     </div>
 
     <div class="divider"></div>
 
-    <!-- Viewer Mode -->
     <div class="sidebar-section">
-      <div class="section-label">Режим отображения</div>
-      <button class="btn btn-toggle-360" id="btn360" onclick="toggle360()">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><ellipse cx="12" cy="12" rx="4" ry="10"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
-        360° Сфера
-      </button>
-    </div>
-
-    <div class="divider"></div>
-
-    <!-- Viewport Options -->
-    <div class="sidebar-section">
-      <div class="section-label">Кадрирование</div>
+      <div class="section-label">Просмотр</div>
+      <button class="btn btn-toggle-360" id="btn360" onclick="toggle360()"></button>
       <div class="select-wrapper">
         <select class="aspect-select" id="aspectSelect" onchange="updateAspectFrame()">
-          <option value="2/1" selected>2 : 1 — Equirectangular</option>
-          <option value="16/9">16 : 9 — Широкоформатный</option>
-          <option value="4/3">4 : 3 — Классический</option>
-          <option value="1/1">1 : 1 — Квадрат</option>
+          <option value="2/1" selected>2 : 1 — вся панорама</option>
+          <option value="16/9">16 : 9 — широкий экран</option>
+          <option value="4/3">4 : 3 — классический</option>
+          <option value="1/1">1 : 1 — квадрат</option>
           <option value="9/16">9 : 16 — Stories / Reels</option>
-          <option value="4/5">4 : 5 — Instagram Portrait</option>
+          <option value="4/5">4 : 5 — Instagram</option>
         </select>
         <span class="select-arrow">▾</span>
       </div>
-    </div>
-
-    <div class="sidebar-section">
-      <div class="section-label">Масштаб</div>
       <div class="zoom-row">
-        <button class="zoom-btn" onclick="changeZoom(-0.15)">−</button>
+        <button class="zoom-btn" onclick="changeZoom(-0.15)" title="Уменьшить">−</button>
         <div class="zoom-display" id="zoomVal">100%</div>
-        <button class="zoom-btn" onclick="changeZoom(+0.15)">+</button>
-        <button class="zoom-reset" onclick="resetZoom()" title="Сбросить">↺</button>
+        <button class="zoom-btn" onclick="changeZoom(+0.15)" title="Увеличить">+</button>
+        <button class="zoom-reset" onclick="resetZoom()" title="Сбросить масштаб">↺</button>
       </div>
     </div>
 
-  </div><!-- /sidebar -->
+  </div>
 
-  <!-- ══ Viewport ══════════════════════════════════════════ -->
   <div class="viewport">
     <div class="canvas-area" id="canvasArea">
-
       <div class="aspect-frame" id="aspectFrame">
         <canvas id="flat-canvas"></canvas>
         <canvas id="webgl-360-canvas"></canvas>
@@ -789,12 +855,11 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); }
       <div class="empty-state" id="emptyState">
         <div class="empty-icon">🌐</div>
         <div class="empty-title">Загрузите два 360° кадра</div>
-        <div class="empty-desc">Перетащите фотографии в поля сверху или нажмите на них. Поддерживается одновременное перетаскивание двух фото.</div>
+        <div class="empty-desc">Два снимка с одной точки (со штатива), между которыми вы перешли на другую сторону.
+          Перетащите оба фото в окно сразу или по одному в поля сверху.</div>
       </div>
+    </div>
 
-    </div><!-- /canvas-area -->
-
-    <!-- Status Bar -->
     <div class="statusbar">
       <div class="status-left">
         <div class="status-dot" id="statusDot"></div>
@@ -802,258 +867,329 @@ input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.2); }
       </div>
       <div class="status-right" id="anglesInfo"></div>
     </div>
-  </div><!-- /viewport -->
+  </div>
+</div>
 
-</div><!-- /app-body -->
+<div class="toasts" id="toasts"></div>
+
+<!-- ══ Окно «Поддержать» ═════════════════════════════════════ -->
+<div class="modal-backdrop" id="donateModal" onclick="if(event.target===this)closeModal('donateModal')">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-icon pink">♥</div>
+      <div class="modal-title">Спасибо, что пользуетесь! <span class="spinner" id="donateSpin" style="display:none"></span></div>
+      <button class="modal-close" onclick="closeModal('donateModal')">✕</button>
+    </div>
+    <div class="modal-text" id="donateMessage"></div>
+    <div id="donateMethods" style="display:flex;flex-direction:column;gap:8px"></div>
+    <div class="modal-faint" id="donateOffline" style="display:none">Свежий список способов загрузить не удалось: показана сохранённая копия.</div>
+  </div>
+</div>
+
+<!-- ══ Окно «Обновления» ═════════════════════════════════════ -->
+<div class="modal-backdrop" id="updateModal" onclick="if(event.target===this)closeModal('updateModal')">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-icon blue">↑</div>
+      <div class="modal-title" id="updTitle">Обновления</div>
+      <button class="modal-close" onclick="closeModal('updateModal')">✕</button>
+    </div>
+    <div class="modal-text" id="updCurrent"></div>
+    <div class="notes" id="updNotes" style="display:none"></div>
+    <div class="modal-text" id="updWarn" style="display:none;color:var(--accent-orange)"></div>
+    <div class="status-line" id="updStatus"></div>
+    <label class="check"><input type="checkbox" id="autoUpdate" onchange="send('set_auto_update',{value:this.checked})"> Проверять обновления автоматически (раз в сутки)</label>
+    <div class="modal-faint" id="updDev" style="display:none">Обновление работает только в собранной программе (из .dmg или .zip релиза).</div>
+    <div class="modal-actions" id="updActions"></div>
+  </div>
+</div>
 
 <script>
 // ════════════════════════════════════════════════════════════
-// STATE
+// Состояние
 // ════════════════════════════════════════════════════════════
+const DEFAULTS = { threshold: 24, dilate: 25, feather: 20 };
 let currentTab = 'result';
-let currentSwap = false;
+let swap = false;
 let is360Mode = false;
 let currentZoom = 1.0;
 let fov360 = 75.0;
 let yaw = 0, pitch = 0;
 let flatPanX = 0, flatPanY = 0;
 let isDragging = false, lastMX = 0, lastMY = 0;
+let loaded = [false, false];
+let hasPreview = false;
+let appVersion = '';
+let canUpdate = false;
+let update = { checking: false, downloading: false, available: null, writable: false, status: null };
 
-let images = { result: null, mask: null, photo1: null, photo2: null };
+const images = { result: null, mask: null, photo0: null, photo1: null };
+const $ = id => document.getElementById(id);
 
-// ════════════════════════════════════════════════════════════
-// IPC with Rust
-// ════════════════════════════════════════════════════════════
-function sendToRust(action, data = {}) {
-  const payload = JSON.stringify({ action, ...data });
-  if (window.ipc) window.ipc.postMessage(payload);
+function send(action, data = {}) {
+  if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, ...data }));
 }
 
-window.onRustMessage = function(msg) {
-  switch(msg.type) {
-    case 'loading_file':
-      setStatus(msg.text, 'busy');
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+// ════════════════════════════════════════════════════════════
+// Сообщения из Rust
+// ════════════════════════════════════════════════════════════
+window.onRustMessage = function (msg) {
+  switch (msg.type) {
+    case 'init':
+      appVersion = msg.version;
+      canUpdate = msg.canUpdate;
+      $('updLabel').textContent = 'v' + msg.version;
+      $('autoUpdate').checked = msg.autoUpdate;
+      setSliders(msg);
+      if (msg.updateFailed) toast('Обновление не установилось — запущена прежняя версия. Скачайте новую со страницы релиза.', 'err');
       break;
 
-    case 'file_loaded': {
-      const slot = msg.slot;
-      const card = document.getElementById(slot === 1 ? 'dz1' : 'dz2');
-      const nameEl = document.getElementById(slot === 1 ? 'f1name' : 'f2name');
-      const thumb = document.getElementById(slot === 1 ? 'thumb1' : 'thumb2');
+    case 'status':
+      setStatus(msg.text, msg.busy ? 'busy' : 'ready');
+      break;
 
-      card.classList.add('loaded');
-      nameEl.textContent = msg.name;
-
-      // Show photo thumbnail in drop zone
-      thumb.innerHTML = `<img src="data:image/jpeg;base64,${msg.thumb_b64}" alt="">`;
-      setStatus('Загружено: ' + msg.name, 'ready');
+    case 'slot_loading': {
+      const card = $('dz' + msg.slot);
+      card.classList.add('loading');
+      $('name' + msg.slot).textContent = 'Открываю ' + msg.name + '…';
       break;
     }
 
-    case 'processing_started':
+    case 'slot_failed': {
+      $('dz' + msg.slot).classList.remove('loading');
+      $('name' + msg.slot).textContent = loaded[msg.slot] ? $('name' + msg.slot).dataset.name : 'Перетащите или нажмите для выбора';
+      break;
+    }
+
+    case 'file_loaded': {
+      const s = msg.slot;
+      loaded[s] = true;
+      hasPreview = false;
+      $('dz' + s).classList.remove('loading');
+      $('dz' + s).classList.add('loaded');
+      $('name' + s).textContent = msg.name;
+      $('name' + s).dataset.name = msg.name;
+      $('name' + s).title = msg.name;
+      $('size' + s).textContent = msg.size || '';
+      const src = 'data:image/jpeg;base64,' + msg.image_b64;
+      $('thumb' + s).innerHTML = `<img src="${src}" alt="">`;
+      loadImg('photo' + s, src);
+      if (!(loaded[0] && loaded[1])) {
+        $('emptyState').style.display = 'none';
+        switchTab('photo' + s);
+      }
+      updateButtons();
+      break;
+    }
+
+    case 'processing':
       showLoading(true, msg.text);
       setStatus(msg.text, 'busy');
       break;
 
     case 'preview_ready':
       showLoading(false);
-      document.getElementById('emptyState').style.display = 'none';
-
-      loadImgB64('result', msg.result_b64);
-      loadImgB64('mask',   msg.mask_b64);
-      loadImgB64('photo1', msg.p1_b64);
-      loadImgB64('photo2', msg.p2_b64);
-
-      if (msg.angle_a != null)
-        document.getElementById('anglesInfo').textContent =
-          `Зона A: ${msg.angle_a.toFixed(0)}°  ·  Зона B: ${msg.angle_b.toFixed(0)}°`;
-
-      setStatus('Готово — человек удалён с обеих зон.', 'ready');
+      hasPreview = true;
+      $('emptyState').style.display = 'none';
+      loadImg('mask', 'data:image/jpeg;base64,' + msg.mask_b64);
+      loadImg('result', 'data:image/jpeg;base64,' + msg.result_b64);
+      if (currentTab === 'photo0' || currentTab === 'photo1') switchTab('result');
+      $('anglesInfo').textContent =
+        `Зона A: ${msg.angle_a.toFixed(0)}° · Зона B: ${msg.angle_b.toFixed(0)}° · различий ${(msg.changed * 100).toFixed(1)}% · ${msg.ms} мс`;
+      if (msg.changed === 0) setStatus('Кадры не различаются: убирать нечего. Попробуйте понизить порог.', 'ready');
+      else if (msg.changed > 0.35) setStatus('Различий очень много: кадры сняты не с одной точки или порог слишком низкий.', 'busy');
+      else setStatus('Готово. Если человек остался — «Поменять зоны».', 'ready');
+      updateButtons();
       break;
 
     case 'save_success':
       showLoading(false);
-      setStatus('Сохранено: ' + msg.path.split('/').pop(), 'ready');
-      alert('✅ Панорама сохранена!\n' + msg.path);
+      setStatus('Сохранено: ' + msg.name, 'ready');
+      toast('Панорама сохранена: ' + esc(msg.name), 'ok', [['Показать в папке', () => send('reveal')]], true);
+      break;
+
+    case 'warning':
+      toast(esc(msg.message), 'warn', [], true);
       break;
 
     case 'error':
       showLoading(false);
-      setStatus('Ошибка: ' + msg.message, '');
-      alert('⚠️ ' + msg.message);
+      setStatus(msg.message, '');
+      toast(esc(msg.message), 'err', [], true);
+      break;
+
+    case 'drag':
+      document.body.classList.toggle('drag-on', !!msg.on && msg.ok !== false);
+      document.body.classList.toggle('drag-bad', !!msg.on && msg.ok === false);
+      break;
+
+    case 'donations':
+      renderDonations(msg);
+      break;
+
+    case 'update':
+      update = msg;
+      renderUpdate();
+      break;
+
+    case 'update_offer':
+      openModal('updateModal');
       break;
   }
 };
 
-function loadImgB64(key, b64) {
+function loadImg(key, src) {
   const img = new Image();
-  img.onload = () => {
-    images[key] = img;
-    if (key === 'result') renderCurrent();
-  };
-  img.src = 'data:image/jpeg;base64,' + b64;
+  img.onload = () => { images[key] = img; if (key === currentTab) renderCurrent(); };
+  img.src = src;
 }
 
 // ════════════════════════════════════════════════════════════
-// Drag & Drop (HTML-side — handled by Rust with_drag_drop_handler)
-// These handlers are for VISUAL feedback only within the WebView
+// Параметры
 // ════════════════════════════════════════════════════════════
-function onDragOver(e, dzId) {
-  e.preventDefault();
-  document.getElementById(dzId).classList.add('dragover');
-}
-function onDragLeave(dzId) {
-  document.getElementById(dzId).classList.remove('dragover');
-}
-function onDrop(e) {
-  e.preventDefault();
-  document.getElementById('dz1').classList.remove('dragover');
-  document.getElementById('dz2').classList.remove('dragover');
-  // Actual file handling goes via Rust's with_drag_drop_handler → UserEvent::FilesDropped
+function setSliders(p) {
+  for (const k of ['threshold', 'dilate', 'feather']) if (p[k] != null) $(k).value = p[k];
+  syncLabels();
 }
 
-// ════════════════════════════════════════════════════════════
-// Controls
-// ════════════════════════════════════════════════════════════
-function syncSlider(id, labelId, suffix) {
-  document.getElementById(labelId).textContent = document.getElementById(id).value + suffix;
+function syncLabels() {
+  $('v_threshold').textContent = $('threshold').value;
+  $('v_dilate').textContent = $('dilate').value + ' px';
+  $('v_feather').textContent = $('feather').value + ' px';
 }
 
-let computeTimer = null;
-function triggerCompute() {
-  clearTimeout(computeTimer);
-  computeTimer = setTimeout(() => {
-    sendToRust('compute', {
-      threshold: +document.getElementById('threshold').value,
-      dilate:    +document.getElementById('dilate').value,
-      feather:   +document.getElementById('feather').value,
-      swap:      currentSwap,
-    });
-  }, 120);
+let paramsTimer = null;
+function sendParams() {
+  clearTimeout(paramsTimer);
+  paramsTimer = setTimeout(() => send('params', {
+    threshold: +$('threshold').value,
+    dilate: +$('dilate').value,
+    feather: +$('feather').value,
+    swap,
+  }), 120);
 }
+
+function onSlider() { syncLabels(); sendParams(); }
+function resetParams() { setSliders(DEFAULTS); sendParams(); }
 
 function toggleSwap() {
-  currentSwap = !currentSwap;
-  setStatus('Зоны инвертированы (Swap = ' + currentSwap + ')', 'busy');
-  triggerCompute();
+  if (!(loaded[0] && loaded[1])) return;
+  swap = !swap;
+  $('swapState').textContent = swap ? 'Зоны поменяны местами.' : 'Человек остался? Поменяйте зоны.';
+  sendParams();
 }
 
-function switchTab(tab, btn) {
+function updateButtons() {
+  $('swapBtn').disabled = !(loaded[0] && loaded[1]);
+  $('saveBtn').disabled = !hasPreview;
+}
+
+function switchTab(tab) {
   currentTab = tab;
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   renderCurrent();
 }
 
 // ════════════════════════════════════════════════════════════
-// 360 Toggle
+// 360° и плоский вид
 // ════════════════════════════════════════════════════════════
+const ICON_SPHERE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><ellipse cx="12" cy="12" rx="4" ry="10"/><line x1="2" y1="12" x2="22" y2="12"/></svg>`;
+const ICON_FLAT = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>`;
+
+function render360Button() {
+  const btn = $('btn360');
+  btn.innerHTML = is360Mode ? ICON_FLAT + ' Плоский вид' : ICON_SPHERE + ' 360° сфера';
+  btn.classList.toggle('active-360', is360Mode);
+}
+
 function toggle360() {
   is360Mode = !is360Mode;
-  const btn = document.getElementById('btn360');
-  const flat = document.getElementById('flat-canvas');
-  const wgl  = document.getElementById('webgl-360-canvas');
-
-  if (is360Mode) {
-    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg> Плоский вид`;
-    btn.classList.add('active-360');
-    flat.style.display = 'none';
-    wgl.style.display  = 'block';
-    initWebGLIfNeeded();
-  } else {
-    btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><ellipse cx="12" cy="12" rx="4" ry="10"/><line x1="2" y1="12" x2="22" y2="12"/></svg> 360° Сфера`;
-    btn.classList.remove('active-360');
-    flat.style.display = 'block';
-    wgl.style.display  = 'none';
-  }
+  render360Button();
+  $('flat-canvas').style.display = is360Mode ? 'none' : 'block';
+  $('webgl-360-canvas').style.display = is360Mode ? 'block' : 'none';
+  if (is360Mode) initWebGLIfNeeded();
+  updateZoomLabel();
   updateAspectFrame();
+}
+
+function updateAspectFrame() {
+  const area = $('canvasArea');
+  const frame = $('aspectFrame');
+  const [a, b] = $('aspectSelect').value.split('/').map(parseFloat);
+  const ratio = a / b;
+  const maxW = Math.max(100, area.clientWidth - 32);
+  const maxH = Math.max(100, area.clientHeight - 32);
+  let w = maxW, h = w / ratio;
+  if (h > maxH) { h = maxH; w = h * ratio; }
+  w = Math.round(w); h = Math.round(h);
+  frame.style.width = w + 'px';
+  frame.style.height = h + 'px';
+  const dpr = window.devicePixelRatio || 1;
+  for (const id of ['flat-canvas', 'webgl-360-canvas']) {
+    const c = $(id);
+    c.width = Math.round(w * dpr);
+    c.height = Math.round(h * dpr);
+  }
+  if (gl) gl.viewport(0, 0, Math.round(w * dpr), Math.round(h * dpr));
   renderCurrent();
 }
 
-// ════════════════════════════════════════════════════════════
-// Aspect Frame & Zoom
-// ════════════════════════════════════════════════════════════
-function updateAspectFrame() {
-  const area  = document.getElementById('canvasArea');
-  const frame = document.getElementById('aspectFrame');
-  const parts = document.getElementById('aspectSelect').value.split('/');
-  const ratio = parseFloat(parts[0]) / parseFloat(parts[1]);
-
-  const maxW = area.clientWidth  - 32;
-  const maxH = area.clientHeight - 32;
-  let w = maxW, h = w / ratio;
-  if (h > maxH) { h = maxH; w = h * ratio; }
-
-  w = Math.round(w);
-  h = Math.round(h);
-  frame.style.width  = w + 'px';
-  frame.style.height = h + 'px';
-
-  const dpr = window.devicePixelRatio || 1;
-  ['flat-canvas','webgl-360-canvas'].forEach(id => {
-    const c = document.getElementById(id);
-    c.width  = w * dpr;
-    c.height = h * dpr;
-  });
-
-  if (gl) gl.viewport(0, 0, w * dpr, h * dpr);
-  renderCurrent();
+function updateZoomLabel() {
+  $('zoomVal').textContent = is360Mode ? Math.round(75 / fov360 * 100) + '%' : Math.round(currentZoom * 100) + '%';
 }
 
 function changeZoom(delta) {
-  if (is360Mode) {
-    fov360 = Math.max(20, Math.min(130, fov360 - delta * 55));
-    document.getElementById('zoomVal').textContent = Math.round(75 / fov360 * 100) + '%';
-  } else {
-    currentZoom = Math.max(0.2, Math.min(8, currentZoom + delta));
-    document.getElementById('zoomVal').textContent = Math.round(currentZoom * 100) + '%';
-  }
+  if (is360Mode) fov360 = Math.max(20, Math.min(130, fov360 - delta * 55));
+  else currentZoom = Math.max(0.2, Math.min(8, currentZoom * (1 + delta)));
+  updateZoomLabel();
   renderCurrent();
 }
 
 function resetZoom() {
   currentZoom = 1; fov360 = 75;
-  flatPanX = 0; flatPanY = 0;
-  yaw = 0; pitch = 0;
-  document.getElementById('zoomVal').textContent = '100%';
+  flatPanX = 0; flatPanY = 0; yaw = 0; pitch = 0;
+  updateZoomLabel();
   renderCurrent();
 }
 
-// ════════════════════════════════════════════════════════════
-// RENDERING
-// ════════════════════════════════════════════════════════════
 function getActiveImage() { return images[currentTab] || null; }
 
 function renderCurrent() {
   const img = getActiveImage();
-  if (!img || !img.complete || img.naturalWidth === 0) return;
+  if (!img) {
+    const c = $('flat-canvas');
+    c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    return;
+  }
   if (is360Mode) render360(img); else renderFlat(img);
 }
 
 function renderFlat(img) {
-  const canvas = document.getElementById('flat-canvas');
+  const canvas = $('flat-canvas');
   const ctx = canvas.getContext('2d');
   const cw = canvas.width, ch = canvas.height;
   ctx.clearRect(0, 0, cw, ch);
-
   const ir = img.naturalWidth / img.naturalHeight;
-  const cr = cw / ch;
   let dw, dh;
-  if (cr > ir) { dh = ch; dw = dh * ir; } else { dw = cw; dh = dw / ir; }
-
+  if (cw / ch > ir) { dh = ch; dw = dh * ir; } else { dw = cw; dh = dw / ir; }
   ctx.save();
   ctx.translate(cw / 2 + flatPanX, ch / 2 + flatPanY);
   ctx.scale(currentZoom, currentZoom);
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
   ctx.restore();
 }
 
-// ── WebGL 360 Sphere ──────────────────────────────────────
-let gl = null, glProg = null, glTex = null;
+// ── Сфера WebGL ───────────────────────────────────────────
+let gl = null, glProg = null, glTex = null, glTexImage = null;
 let uAspect, uYaw, uPitch, uFov, uTex;
 
 const VS = `attribute vec2 a;varying vec2 v;void main(){v=a;gl_Position=vec4(a,0,1);}`;
-const FS = `precision mediump float;
+const FS = `precision highp float;
 varying vec2 v; uniform sampler2D u; uniform float asp,yw,pt,fv;
 #define PI 3.141592653589793
 void main(){
@@ -1069,92 +1205,237 @@ void main(){
 
 function initWebGLIfNeeded() {
   if (gl) return;
-  const c = document.getElementById('webgl-360-canvas');
-  gl = c.getContext('webgl',{alpha:false,antialias:true});
-  if (!gl) return;
-
-  function shader(type, src) {
+  const c = $('webgl-360-canvas');
+  gl = c.getContext('webgl', { alpha: false, antialias: true });
+  if (!gl) { toast('WebGL недоступен: 360° просмотр не работает на этом компьютере.', 'err'); return; }
+  const shader = (type, src) => {
     const s = gl.createShader(type);
-    gl.shaderSource(s, src); gl.compileShader(s); return s;
-  }
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+    return s;
+  };
   glProg = gl.createProgram();
   gl.attachShader(glProg, shader(gl.VERTEX_SHADER, VS));
   gl.attachShader(glProg, shader(gl.FRAGMENT_SHADER, FS));
   gl.linkProgram(glProg); gl.useProgram(glProg);
-
   const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
   const a = gl.getAttribLocation(glProg, 'a');
-  gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
-
-  uAspect=gl.getUniformLocation(glProg,'asp');
-  uYaw  =gl.getUniformLocation(glProg,'yw');
-  uPitch=gl.getUniformLocation(glProg,'pt');
-  uFov  =gl.getUniformLocation(glProg,'fv');
-  uTex  =gl.getUniformLocation(glProg,'u');
-
-  glTex=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,glTex);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0);
+  uAspect = gl.getUniformLocation(glProg, 'asp');
+  uYaw = gl.getUniformLocation(glProg, 'yw');
+  uPitch = gl.getUniformLocation(glProg, 'pt');
+  uFov = gl.getUniformLocation(glProg, 'fv');
+  uTex = gl.getUniformLocation(glProg, 'u');
+  glTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, glTex);
+  // WebGL 1: REPEAT только для текстур со сторонами степени двойки, поэтому CLAMP + fract() в шейдере
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.viewport(0, 0, c.width, c.height);
 }
 
 function render360(img) {
   initWebGLIfNeeded();
   if (!gl) return;
-  const c = document.getElementById('webgl-360-canvas');
+  const c = $('webgl-360-canvas');
   gl.useProgram(glProg);
-  gl.bindTexture(gl.TEXTURE_2D,glTex);
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img);
-  gl.uniform1f(uAspect, c.width/c.height);
-  gl.uniform1f(uYaw,   yaw);
+  gl.bindTexture(gl.TEXTURE_2D, glTex);
+  // загрузка в видеопамять только при смене картинки, не на каждый кадр
+  if (glTexImage !== img) {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    glTexImage = img;
+  }
+  gl.uniform1f(uAspect, c.width / c.height);
+  gl.uniform1f(uYaw, yaw);
   gl.uniform1f(uPitch, pitch);
-  gl.uniform1f(uFov,   fov360*Math.PI/180);
-  gl.uniform1i(uTex,   0);
-  gl.drawArrays(gl.TRIANGLES,0,6);
+  gl.uniform1f(uFov, fov360 * Math.PI / 180);
+  gl.uniform1i(uTex, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
-// ── Mouse interaction ─────────────────────────────────────
-const frame = document.getElementById('aspectFrame');
-frame.addEventListener('mousedown', e => { isDragging=true; lastMX=e.clientX; lastMY=e.clientY; });
-window.addEventListener('mouseup', () => isDragging=false);
+let frameRequested = false;
+function requestRender() {
+  if (frameRequested) return;
+  frameRequested = true;
+  requestAnimationFrame(() => { frameRequested = false; renderCurrent(); });
+}
+
+const frame = $('aspectFrame');
+frame.addEventListener('mousedown', e => { isDragging = true; lastMX = e.clientX; lastMY = e.clientY; });
+frame.addEventListener('dblclick', resetZoom);
+window.addEventListener('mouseup', () => isDragging = false);
 window.addEventListener('mousemove', e => {
   if (!isDragging) return;
-  const dx=e.clientX-lastMX, dy=e.clientY-lastMY;
-  lastMX=e.clientX; lastMY=e.clientY;
+  const dx = e.clientX - lastMX, dy = e.clientY - lastMY;
+  lastMX = e.clientX; lastMY = e.clientY;
   if (is360Mode) {
-    const s=(fov360/75)*0.004;
-    yaw-=dx*s; pitch=Math.max(-1.48,Math.min(1.48,pitch-dy*s));
+    const s = (fov360 / 75) * 0.004;
+    yaw -= dx * s;
+    pitch = Math.max(-1.48, Math.min(1.48, pitch - dy * s));
   } else {
-    const dpr=window.devicePixelRatio||1;
-    flatPanX+=dx*dpr; flatPanY+=dy*dpr;
+    const dpr = window.devicePixelRatio || 1;
+    flatPanX += dx * dpr; flatPanY += dy * dpr;
   }
-  renderCurrent();
+  requestRender();
 });
 frame.addEventListener('wheel', e => {
   e.preventDefault();
-  changeZoom(e.deltaY<0?0.1:-0.1);
-},{passive:false});
+  changeZoom(e.deltaY < 0 ? 0.1 : -0.1);
+}, { passive: false });
 
-// ── Resize ───────────────────────────────────────────────
-window.addEventListener('resize', () => { updateAspectFrame(); });
+window.addEventListener('resize', updateAspectFrame);
 
-// ── Status helpers ────────────────────────────────────────
+// ── Клавиши ───────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && (e.key === 'q' || e.key === 'й')) { e.preventDefault(); send('quit'); return; }
+  if (mod && (e.key === 's' || e.key === 'ы')) { e.preventDefault(); if (hasPreview) send('save'); return; }
+  if (mod && (e.key === 'o' || e.key === 'щ')) { e.preventDefault(); send('pick', { slot: loaded[0] ? 1 : 0 }); return; }
+  if (e.key === 'Escape') { closeModal('donateModal'); closeModal('updateModal'); return; }
+  if (mod || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (document.querySelector('.modal-backdrop.open')) return;
+  const tabs = { '1': 'result', '2': 'mask', '3': 'photo0', '4': 'photo1' };
+  if (tabs[e.key]) switchTab(tabs[e.key]);
+  else if (e.key === 's' || e.key === 'ы') toggleSwap();
+  else if (e.key === ' ') { e.preventDefault(); toggle360(); }
+  else if (e.key === '+' || e.key === '=') changeZoom(0.15);
+  else if (e.key === '-') changeZoom(-0.15);
+  else if (e.key === '0') resetZoom();
+});
+
+// ════════════════════════════════════════════════════════════
+// Статус и уведомления
+// ════════════════════════════════════════════════════════════
 function setStatus(text, state) {
-  document.getElementById('statusMsg').textContent = text;
-  const dot = document.getElementById('statusDot');
-  dot.className = 'status-dot' + (state ? ' ' + state : '');
+  $('statusMsg').textContent = text;
+  $('statusDot').className = 'status-dot' + (state ? ' ' + state : '');
 }
 
 function showLoading(show, text) {
-  const ov = document.getElementById('loadingOverlay');
-  ov.style.display = show ? 'flex' : 'none';
-  if (text) document.getElementById('loadingLabel').textContent = text;
+  $('loadingOverlay').style.display = show ? 'flex' : 'none';
+  if (text) $('loadingLabel').textContent = text;
 }
 
-// Init
+/** html — уже экранированный текст; actions — [[подпись, функция]]. */
+function toast(html, kind = 'ok', actions = [], sticky = false) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  const body = document.createElement('div');
+  body.className = 't-body';
+  body.innerHTML = html;
+  if (actions.length) {
+    const row = document.createElement('div');
+    row.className = 't-actions';
+    for (const [label, fn] of actions) {
+      const b = document.createElement('button');
+      b.className = 'btn btn-ghost btn-small';
+      b.textContent = label;
+      b.onclick = fn;
+      row.appendChild(b);
+    }
+    body.appendChild(row);
+  }
+  const close = document.createElement('button');
+  close.className = 't-close';
+  close.textContent = '✕';
+  close.onclick = () => el.remove();
+  el.append(body, close);
+  $('toasts').appendChild(el);
+  while ($('toasts').children.length > 4) $('toasts').firstChild.remove();
+  setTimeout(() => el.remove(), sticky ? 12000 : 6000);
+}
+
+// ════════════════════════════════════════════════════════════
+// Поддержать
+// ════════════════════════════════════════════════════════════
+function openModal(id) { $(id).classList.add('open'); }
+function closeModal(id) { $(id).classList.remove('open'); }
+
+function openDonate() {
+  openModal('donateModal');
+  send('donate_open');
+}
+
+const METHOD_ICON = { cloudtips: '💳', tribute: '🌍' };
+
+function renderDonations(msg) {
+  const info = msg.info || { methods: [] };
+  $('donateSpin').style.display = msg.loading ? 'inline-block' : 'none';
+  $('donateMessage').textContent = info.message || '';
+  $('donateOffline').style.display = msg.offline ? 'block' : 'none';
+  const box = $('donateMethods');
+  box.innerHTML = '';
+  for (const m of info.methods) {
+    const b = document.createElement('button');
+    b.className = 'method';
+    b.title = m.url;
+    b.innerHTML = `<span style="font-size:20px">${METHOD_ICON[m.id] || '🤝'}</span>
+      <span><div class="method-title">${esc(m.title)}</div>${m.description ? `<div class="method-desc">${esc(m.description)}</div>` : ''}</span>
+      <span class="method-arrow">↗</span>`;
+    b.onclick = () => send('open_url', { url: m.url });
+    box.appendChild(b);
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// Обновления
+// ════════════════════════════════════════════════════════════
+function openUpdates() {
+  renderUpdate();
+  openModal('updateModal');
+}
+
+function actionButton(label, cls, fn, disabled = false) {
+  const b = document.createElement('button');
+  b.className = 'btn ' + cls;
+  b.textContent = label;
+  b.disabled = disabled;
+  b.onclick = fn;
+  return b;
+}
+
+function renderUpdate() {
+  const u = update;
+  const a = u.available;
+  $('updBtn').classList.toggle('has-update', !!a);
+  $('updLabel').textContent = a ? 'Версия ' + a.version : 'v' + appVersion;
+  $('updTitle').textContent = a ? 'Доступна версия ' + a.version : 'Обновления';
+  $('updCurrent').textContent = `Установлена версия ${appVersion}. Новые версии берутся из релизов на GitHub.`;
+  $('updNotes').style.display = a && a.notes ? 'block' : 'none';
+  $('updNotes').textContent = a ? a.notes : '';
+  $('updWarn').style.display = a && canUpdate && !u.writable ? 'block' : 'none';
+  $('updWarn').textContent = 'Эта копия не может обновить себя сама (нет прав на запись в её папку): скачайте новую версию со страницы релиза.';
+  $('updDev').style.display = canUpdate ? 'none' : 'block';
+  const st = $('updStatus');
+  if (u.checking) { st.className = 'status-line'; st.innerHTML = '<span class="spinner"></span> Проверяю…'; }
+  else if (u.downloading) { st.className = 'status-line new'; st.innerHTML = '<span class="spinner"></span> ' + esc(u.status ? u.status.text : 'Загружаю обновление…'); }
+  else if (u.status) { st.className = 'status-line ' + u.status.kind; st.textContent = u.status.text; }
+  else { st.className = 'status-line'; st.textContent = ''; }
+
+  const row = $('updActions');
+  row.innerHTML = '';
+  const busy = u.checking || u.downloading;
+  if (a) {
+    row.appendChild(actionButton('Пропустить версию', 'btn-ghost', () => { send('update_skip'); closeModal('updateModal'); }, busy));
+    row.appendChild(actionButton('Позже', 'btn-ghost', () => closeModal('updateModal'), u.downloading));
+    if (canUpdate && u.writable) row.appendChild(actionButton('Обновить и перезапустить', 'btn-primary', () => send('update_install'), busy));
+    else row.appendChild(actionButton('Открыть страницу релиза', 'btn-primary', () => send('update_page')));
+  } else {
+    row.appendChild(actionButton('Все версии', 'btn-ghost', () => send('update_page')));
+    row.appendChild(actionButton('Проверить обновления', 'btn-primary', () => send('update_check'), busy || !canUpdate));
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// Запуск
+// ════════════════════════════════════════════════════════════
+render360Button();
+syncLabels();
+updateButtons();
 setTimeout(updateAspectFrame, 50);
+send('ready');
 </script>
 </body>
 </html>

@@ -1,0 +1,92 @@
+name: Build and release
+
+# Каждый PR и push в main собирают обе версии. Тег v* (версия должна совпадать с Cargo.toml) выпускает релиз:
+#   360Cleaner-macOS-<тег>.dmg              — для людей (Apple Silicon)
+#   360Cleaner-<версия>-macos-arm64.zip    — для обновления из программы на Mac
+#   360Cleaner-<версия>-windows-x64.zip    — Windows: 360Cleaner.exe (и для обновления из программы)
+# Описание релиза берётся из docs/releases/<тег>.md; программа показывает его в окне обновления.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Check the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | python3 -c "import json,sys; print(json.load(sys.stdin)['packages'][0]['version'])")
+          [[ "v$version" == "$GITHUB_REF_NAME" ]] || { echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml ($version)"; exit 1; }
+      - name: Format and lints
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+      - name: Build .app, .dmg and the update zip (Apple Silicon)
+        run: scripts/build-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            dist/360Cleaner-macOS.dmg
+            dist/360Cleaner-*-macos-arm64.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests and lints
+        run: |
+          cargo test
+          cargo clippy --all-targets -- -D warnings
+      - name: Build .exe
+        run: cargo build --release
+      - name: Pack
+        shell: pwsh
+        run: |
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          New-Item -ItemType Directory -Force dist/win | Out-Null
+          Copy-Item target/release/cleaner360.exe "dist/win/360Cleaner.exe"
+          Compress-Archive -Path "dist/win/360Cleaner.exe" -DestinationPath "dist/360Cleaner-$version-windows-x64.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/360Cleaner-*-windows-x64.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=docs/releases/$GITHUB_REF_NAME.md
+          if [[ -f "$notes" ]]; then args=(--notes-file "../$notes"); else args=(--generate-notes); fi
+          cd dist
+          mv 360Cleaner-macOS.dmg "360Cleaner-macOS-$GITHUB_REF_NAME.dmg"
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "360Cleaner $GITHUB_REF_NAME" "${args[@]}" \
+            "360Cleaner-macOS-$GITHUB_REF_NAME.dmg" 360Cleaner-*-macos-arm64.zip 360Cleaner-*-windows-x64.zip

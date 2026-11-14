@@ -1,391 +1,539 @@
-//! Core image processing engine for 360-degree panorama person removal.
-//! Pure classical Computer Vision in Rust with parallel Rayon execution.
+//! Обработка: две равнопромежуточные (equirectangular) 360° панорамы с одной точки → одна без человека.
+//! Классическое компьютерное зрение без нейросетей, параллельно через Rayon.
+//!
+//! Шаги: разница в цветовом пространстве Lab → порог → убрать одиночные точки шума → расширить маску кругом
+//! (по горизонтали панорама замкнута) → два угловых кластера на окружности (где стоял человек на каждом кадре) →
+//! мягкая маска «брать пиксель из второго кадра» → смешивание.
+//!
+//! Маска считается один раз по превью и для экспорта растягивается до полного размера, поэтому сохранённый файл
+//! совпадает с тем, что видно в окне.
 
-use image::{ImageBuffer, Rgb, RgbImage};
+use image::RgbImage;
 use rayon::prelude::*;
 use std::f32::consts::PI;
 use std::path::Path;
 
-/// Perceptual Lab color
-#[derive(Clone, Copy)]
-pub struct Lab {
-    pub l: f32,
-    pub a: f32,
-    pub b: f32,
+/// Ширина, до которой уменьшаются кадры для превью и расчёта маски.
+pub const PREVIEW_DIM: u32 = 1400;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Params {
+    /// Порог разницы ΔE (Lab).
+    pub threshold: f32,
+    /// Радиус расширения маски, пикселей превью.
+    pub dilate: i32,
+    /// Радиус смягчения шва, пикселей превью.
+    pub feather: i32,
+    /// Поменять, из какого кадра берётся каждая зона.
+    pub swap: bool,
+}
+
+impl Default for Params {
+    fn default() -> Self {
+        Params { threshold: 24.0, dilate: 25, feather: 20, swap: false }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Lab {
+    l: f32,
+    a: f32,
+    b: f32,
 }
 
 #[inline(always)]
 fn rgb_to_lab(r: u8, g: u8, b: u8) -> Lab {
-    // sRGB to linear RGB
     let to_linear = |c: u8| -> f32 {
         let v = (c as f32) / 255.0;
-        if v <= 0.04045 {
-            v / 12.92
-        } else {
-            ((v + 0.055) / 1.055).powf(2.4)
-        }
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
     };
-    let lr = to_linear(r);
-    let lg = to_linear(g);
-    let lb = to_linear(b);
-
-    // Observer: 2°, Illuminant: D65
-    let x = (lr * 0.4124564 + lg * 0.3575761 + lb * 0.1804375) / 0.95047;
-    let y = (lr * 0.2126729 + lg * 0.7151522 + lb * 0.0721750) / 1.00000;
-    let z = (lr * 0.0193339 + lg * 0.1191920 + lb * 0.9503041) / 1.08883;
-
-    let f = |t: f32| -> f32 {
-        if t > 0.008856 {
-            t.cbrt()
-        } else {
-            (7.787 * t) + (16.0 / 116.0)
-        }
-    };
-
-    let fx = f(x);
-    let fy = f(y);
-    let fz = f(z);
-
-    Lab {
-        l: (116.0 * fy) - 16.0,
-        a: 500.0 * (fx - fy),
-        b: 200.0 * (fy - fz),
-    }
+    let (lr, lg, lb) = (to_linear(r), to_linear(g), to_linear(b));
+    // наблюдатель 2°, источник D65
+    let x = (lr * 0.412_456_4 + lg * 0.357_576_1 + lb * 0.180_437_5) / 0.95047;
+    let y = lr * 0.212_672_9 + lg * 0.715_152_2 + lb * 0.072_175;
+    let z = (lr * 0.019_333_9 + lg * 0.119_192 + lb * 0.950_304_1) / 1.08883;
+    let f = |t: f32| if t > 0.008856 { t.cbrt() } else { 7.787 * t + 16.0 / 116.0 };
+    let (fx, fy, fz) = (f(x), f(y), f(z));
+    Lab { l: 116.0 * fy - 16.0, a: 500.0 * (fx - fy), b: 200.0 * (fy - fz) }
 }
 
-#[inline(always)]
-fn delta_e(c1: Lab, c2: Lab) -> f32 {
-    let dl = c1.l - c2.l;
-    let da = c1.a - c2.a;
-    let db = c1.b - c2.b;
-    (dl * dl + da * da + db * db).sqrt()
-}
-
-/// Circular distance between two angles in radians [0, 2*PI)
+/// Расстояние между углами на окружности, радианы, [0, π].
 #[inline(always)]
 pub fn circular_distance(a: f32, b: f32) -> f32 {
     let diff = (a - b).abs() % (2.0 * PI);
-    if diff > PI {
-        2.0 * PI - diff
+    if diff > PI { 2.0 * PI - diff } else { diff }
+}
+
+/// Открывает файл; с `max_dim` уменьшает так, чтобы большая сторона была не больше `max_dim`.
+pub fn load_image(path: &Path, max_dim: Option<u32>) -> Result<RgbImage, String> {
+    let img = image::open(path).map_err(|e| e.to_string())?.to_rgb8();
+    Ok(match max_dim {
+        Some(dim) => downscale(img, dim),
+        None => img,
+    })
+}
+
+pub fn downscale(img: RgbImage, dim: u32) -> RgbImage {
+    let (w, h) = img.dimensions();
+    if w <= dim && h <= dim {
+        return img;
+    }
+    let scale = dim as f32 / w.max(h) as f32;
+    let nw = ((w as f32 * scale).round() as u32).max(1);
+    let nh = ((h as f32 * scale).round() as u32).max(1);
+    image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle)
+}
+
+/// Второй кадр того же размера, что первый.
+pub fn match_size(img: RgbImage, w: u32, h: u32) -> RgbImage {
+    if img.dimensions() == (w, h) {
+        img
     } else {
-        diff
+        image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle)
     }
 }
 
-/// Load image from file and optionally downscale to max_dim for fast preview
-pub fn load_image(path: &Path, max_dim: Option<u32>) -> Result<RgbImage, Box<dyn std::error::Error>> {
-    let img = image::open(path)?.to_rgb8();
-    if let Some(dim) = max_dim {
-        let (w, h) = img.dimensions();
-        if w > dim || h > dim {
-            let scale = (dim as f32) / (w.max(h) as f32);
-            let nw = (w as f32 * scale).round() as u32;
-            let nh = (h as f32 * scale).round() as u32;
-            let resized = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
-            return Ok(resized);
-        }
-    }
-    Ok(img)
-}
-
-/// Compute raw Lab difference map between two images
+/// Разница ΔE76 между кадрами по пикселям.
 pub fn compute_difference_map(img1: &RgbImage, img2: &RgbImage) -> Vec<f32> {
-    let (w, h) = img1.dimensions();
-    let total = (w * h) as usize;
-    let mut diff = vec![0.0f32; total];
-
-    diff.par_chunks_mut(w as usize)
-        .enumerate()
-        .for_each(|(y, row)| {
-            for x in 0..w {
-                let p1 = img1.get_pixel(x, y as u32);
-                let p2 = img2.get_pixel(x, y as u32);
-                let lab1 = rgb_to_lab(p1[0], p1[1], p1[2]);
-                let lab2 = rgb_to_lab(p2[0], p2[1], p2[2]);
-                row[x as usize] = delta_e(lab1, lab2);
-            }
-        });
-
+    let w = img1.width() as usize;
+    let (a, b) = (img1.as_raw(), img2.as_raw());
+    let mut diff = vec![0.0f32; w * img1.height() as usize];
+    diff.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        let base = y * w * 3;
+        for (x, out) in row.iter_mut().enumerate() {
+            let i = base + x * 3;
+            let p = rgb_to_lab(a[i], a[i + 1], a[i + 2]);
+            let q = rgb_to_lab(b[i], b[i + 1], b[i + 2]);
+            let (dl, da, db) = (p.l - q.l, p.a - q.a, p.b - q.b);
+            *out = (dl * dl + da * da + db * db).sqrt();
+        }
+    });
     diff
 }
 
-/// Apply morphological dilation with horizontal 360-degree circular wrapping
+/// Для каждого пикселя строки — расстояние по горизонтали до ближайшего `true` с учётом замкнутости панорамы,
+/// не больше `cap`.
+fn row_distances(row: &[bool], cap: u32, out: &mut [u32]) {
+    let w = row.len();
+    if !row.iter().any(|&b| b) {
+        out.fill(cap);
+        return;
+    }
+    // два прохода по удвоенной строке: слева направо и справа налево
+    let mut d = cap;
+    for i in 0..2 * w {
+        let x = i % w;
+        d = if row[x] { 0 } else { (d + 1).min(cap) };
+        if i >= w {
+            out[x] = d;
+        }
+    }
+    d = cap;
+    for i in (0..2 * w).rev() {
+        let x = i % w;
+        d = if row[x] { 0 } else { (d + 1).min(cap) };
+        if i < w {
+            out[x] = out[x].min(d);
+        }
+    }
+}
+
+/// Расширение маски кругом радиуса `radius`; по горизонтали панорама замкнута, по вертикали — нет.
+/// Работает за O(w·h·r): расстояния по строкам считаются один раз.
 pub fn dilate_mask_360(mask: &[bool], w: u32, h: u32, radius: i32) -> Vec<bool> {
     if radius <= 0 {
         return mask.to_vec();
     }
-    let mut result = vec![false; (w * h) as usize];
-    let r2 = radius * radius;
-
+    let (w, h, r) = (w as usize, h as usize, radius as usize);
+    let cap = (r + 1) as u32;
+    let mut dist = vec![0u32; w * h];
+    dist.par_chunks_mut(w).zip(mask.par_chunks(w)).for_each(|(out, row)| row_distances(row, cap, out));
+    // половина ширины круга на расстоянии dy от центра
+    let reach: Vec<u32> = (0..=r).map(|dy| (((r * r - dy * dy) as f64).sqrt().floor()) as u32).collect();
+    let mut result = vec![false; w * h];
+    result.par_chunks_mut(w).enumerate().for_each(|(y, out)| {
+        let y0 = y.saturating_sub(r);
+        let y1 = (y + r).min(h - 1);
+        for (x, o) in out.iter_mut().enumerate() {
+            *o = (y0..=y1).any(|ny| dist[ny * w + x] <= reach[ny.abs_diff(y)]);
+        }
+    });
     result
-        .par_chunks_mut(w as usize)
-        .enumerate()
-        .for_each(|(y_idx, row_out)| {
-            let y = y_idx as i32;
-            for x in 0..(w as i32) {
-                let mut found = false;
-                'outer: for dy in -radius..=radius {
+}
+
+/// Сужение маски (обратное расширению): убирает точки шума меньше круга радиуса `radius`.
+pub fn erode_mask_360(mask: &[bool], w: u32, h: u32, radius: i32) -> Vec<bool> {
+    let inverted: Vec<bool> = mask.iter().map(|&b| !b).collect();
+    dilate_mask_360(&inverted, w, h, radius).into_iter().map(|b| !b).collect()
+}
+
+/// Центры двух зон различий на окружности: где на первом кадре стоял человек и где на втором.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClusterAngles {
+    /// [0, 2π), всегда `angle_a < angle_b`.
+    pub angle_a: f32,
+    pub angle_b: f32,
+}
+
+const BINS: usize = 360;
+
+/// k-средних на окружности с детерминированным началом: самый плотный столбец гистограммы углов и самый плотный
+/// из тех, что дальше 30° от него.
+pub fn find_cluster_angles(mask: &[bool], w: u32, h: u32) -> ClusterAngles {
+    let (w, h) = (w as usize, h as usize);
+    let mut columns = vec![0u32; w];
+    for y in 0..h {
+        for (x, c) in columns.iter_mut().enumerate() {
+            *c += mask[y * w + x] as u32;
+        }
+    }
+    let total: u32 = columns.iter().sum();
+    if total < 20 {
+        return ClusterAngles { angle_a: 0.0, angle_b: PI };
+    }
+    let theta = |x: usize| 2.0 * PI * (x as f32 + 0.5) / w as f32;
+
+    let mut hist = [0f32; BINS];
+    for (x, &c) in columns.iter().enumerate() {
+        hist[(x * BINS / w).min(BINS - 1)] += c as f32;
+    }
+    // сглаживание ±5°
+    let smooth: Vec<f32> = (0..BINS).map(|i| (0..11).map(|k| hist[(i + BINS + k - 5) % BINS]).sum()).collect();
+    let bin_angle = |i: usize| 2.0 * PI * (i as f32 + 0.5) / BINS as f32;
+    let first = (0..BINS).max_by(|&a, &b| smooth[a].total_cmp(&smooth[b])).unwrap_or(0);
+    let a0 = bin_angle(first);
+    let second = (0..BINS)
+        .filter(|&i| circular_distance(bin_angle(i), a0) > 30f32.to_radians() && smooth[i] > 0.0)
+        .max_by(|&a, &b| smooth[a].total_cmp(&smooth[b]));
+    let a1 = second.map(bin_angle).unwrap_or(a0 + PI);
+
+    let mut c0 = (a0.cos(), a0.sin());
+    let mut c1 = (a1.cos(), a1.sin());
+    for _ in 0..20 {
+        let (mut s0, mut s1) = ((0f32, 0f32), (0f32, 0f32));
+        for (x, &n) in columns.iter().enumerate() {
+            if n == 0 {
+                continue;
+            }
+            let t = theta(x);
+            let (c, s) = (t.cos(), t.sin());
+            let n = n as f32;
+            if c * c0.0 + s * c0.1 >= c * c1.0 + s * c1.1 {
+                s0 = (s0.0 + c * n, s0.1 + s * n);
+            } else {
+                s1 = (s1.0 + c * n, s1.1 + s * n);
+            }
+        }
+        let norm = |v: (f32, f32)| (v.0 * v.0 + v.1 * v.1).sqrt();
+        if norm(s0) > 1e-5 {
+            c0 = (s0.0 / norm(s0), s0.1 / norm(s0));
+        }
+        if norm(s1) > 1e-5 {
+            c1 = (s1.0 / norm(s1), s1.1 / norm(s1));
+        }
+    }
+    let mut ang0 = c0.1.atan2(c0.0).rem_euclid(2.0 * PI);
+    let mut ang1 = c1.1.atan2(c1.0).rem_euclid(2.0 * PI);
+    if ang0 > ang1 {
+        std::mem::swap(&mut ang0, &mut ang1);
+    }
+    ClusterAngles { angle_a: ang0, angle_b: ang1 }
+}
+
+/// Относится ли столбец `x` к зоне A.
+#[inline(always)]
+fn in_zone_a(x: usize, w: usize, angles: ClusterAngles) -> bool {
+    let t = 2.0 * PI * (x as f32 + 0.5) / w as f32;
+    circular_distance(t, angles.angle_a) <= circular_distance(t, angles.angle_b)
+}
+
+/// Маска «взять пиксель из второго кадра» до смягчения: без swap — зона A, со swap — зона B.
+pub fn target_mask(mask: &[bool], w: u32, angles: ClusterAngles, swap: bool) -> Vec<bool> {
+    let w = w as usize;
+    let zone: Vec<bool> = (0..w).map(|x| in_zone_a(x, w, angles) != swap).collect();
+    mask.iter().enumerate().map(|(i, &m)| m && zone[i % w]).collect()
+}
+
+/// Смягчение маски: размытие прямоугольником по горизонтали (замкнуто) и по вертикали.
+pub fn feather_alpha(mask: &[bool], w: u32, h: u32, radius: i32) -> Vec<f32> {
+    let alpha: Vec<f32> = mask.iter().map(|&b| b as u8 as f32).collect();
+    if radius <= 0 {
+        return alpha;
+    }
+    let (w, h) = (w as usize, h as usize);
+    let r = (radius as usize).min(w / 2).max(1);
+    let diameter = (2 * r + 1) as f32;
+
+    let mut temp = vec![0f32; w * h];
+    temp.par_chunks_mut(w).zip(alpha.par_chunks(w)).for_each(|(out, row)| {
+        let mut sum: f32 = (0..=2 * r).map(|k| row[(k + w - r) % w]).sum();
+        out[0] = sum / diameter;
+        for x in 1..w {
+            sum += row[(x + r) % w] - row[(x + w - r - 1) % w];
+            out[x] = (sum / diameter).clamp(0.0, 1.0);
+        }
+    });
+    let mut result = vec![0f32; w * h];
+    result.par_chunks_mut(w).enumerate().for_each(|(y, out)| {
+        let y0 = y.saturating_sub(r);
+        let y1 = (y + r).min(h - 1);
+        let n = (y1 - y0 + 1) as f32;
+        for (x, o) in out.iter_mut().enumerate() {
+            let sum: f32 = (y0..=y1).map(|ny| temp[ny * w + x]).sum();
+            *o = (sum / n).clamp(0.0, 1.0);
+        }
+    });
+    result
+}
+
+/// Мягкая маска в размере превью.
+#[derive(Clone, Debug)]
+pub struct Alpha {
+    pub w: u32,
+    pub h: u32,
+    pub data: Vec<f32>,
+}
+
+impl Alpha {
+    /// Значение в точке (u, v) ∈ [0,1)² с билинейной интерполяцией; по горизонтали замкнуто.
+    #[inline(always)]
+    fn sample(&self, u: f32, v: f32) -> f32 {
+        let (w, h) = (self.w as usize, self.h as usize);
+        let fx = u * w as f32 - 0.5;
+        let fy = (v * h as f32 - 0.5).clamp(0.0, (h - 1) as f32);
+        let x0f = fx.floor();
+        let tx = fx - x0f;
+        let x0 = (x0f as i64).rem_euclid(w as i64) as usize;
+        let x1 = (x0 + 1) % w;
+        let y0 = fy.floor() as usize;
+        let y1 = (y0 + 1).min(h - 1);
+        let ty = fy - y0 as f32;
+        let d = &self.data;
+        let top = d[y0 * w + x0] * (1.0 - tx) + d[y0 * w + x1] * tx;
+        let bottom = d[y1 * w + x0] * (1.0 - tx) + d[y1 * w + x1] * tx;
+        top * (1.0 - ty) + bottom * ty
+    }
+}
+
+pub struct Preview {
+    pub result: RgbImage,
+    pub mask_vis: RgbImage,
+    pub alpha: Alpha,
+    pub angles: ClusterAngles,
+    /// Доля пикселей, где кадры различаются.
+    pub changed: f32,
+}
+
+/// Полный расчёт по превью. Кадры одного размера.
+pub fn compute_preview(img1: &RgbImage, img2: &RgbImage, p: Params) -> Preview {
+    let (w, h) = img1.dimensions();
+    let diff = compute_difference_map(img1, img2);
+    let raw: Vec<bool> = diff.iter().map(|&d| d > p.threshold).collect();
+    // одиночные точки (шум JPEG, листья) не должны раздуваться расширением
+    let opened = dilate_mask_360(&erode_mask_360(&raw, w, h, 1), w, h, 1);
+    let mask = dilate_mask_360(&opened, w, h, p.dilate);
+    let angles = find_cluster_angles(&mask, w, h);
+    let target = target_mask(&mask, w, angles, p.swap);
+    let alpha = Alpha { w, h, data: feather_alpha(&target, w, h, p.feather) };
+    let mut result = img1.clone();
+    blend_into(&mut result, img2, &alpha);
+    let changed = mask.iter().filter(|&&m| m).count() as f32 / mask.len().max(1) as f32;
+    Preview { result, mask_vis: mask_visualization(&mask, w, h, angles), alpha, angles, changed }
+}
+
+/// Смешивает `img2` в `base` по мягкой маске любого размера (растягивается до размера кадра).
+pub fn blend_into(base: &mut RgbImage, img2: &RgbImage, alpha: &Alpha) {
+    let (w, h) = base.dimensions();
+    let same = alpha.w == w && alpha.h == h;
+    let row_len = w as usize * 3;
+    let src = img2.as_raw();
+    base.par_chunks_mut(row_len).enumerate().for_each(|(y, row)| {
+        let v = (y as f32 + 0.5) / h as f32;
+        for x in 0..w as usize {
+            let a = if same { alpha.data[y * w as usize + x] } else { alpha.sample((x as f32 + 0.5) / w as f32, v) };
+            if a <= 0.0 {
+                continue;
+            }
+            let i = x * 3;
+            let j = y * row_len + i;
+            for c in 0..3 {
+                let p1 = row[i + c] as f32;
+                let p2 = src[j + c] as f32;
+                row[i + c] = ((1.0 - a) * p1 + a * p2).round() as u8;
+            }
+        }
+    });
+}
+
+/// Карта различий: зона A — голубая, зона B — красная.
+pub fn mask_visualization(mask: &[bool], w: u32, h: u32, angles: ClusterAngles) -> RgbImage {
+    let wu = w as usize;
+    let zone: Vec<bool> = (0..wu).map(|x| in_zone_a(x, wu, angles)).collect();
+    let mut vis = RgbImage::new(w, h);
+    for (i, px) in vis.pixels_mut().enumerate() {
+        px.0 = if !mask[i] {
+            [15, 23, 42]
+        } else if zone[i % wu] {
+            [56, 189, 248]
+        } else {
+            [239, 68, 68]
+        };
+    }
+    vis
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn brute_dilate(mask: &[bool], w: u32, h: u32, r: i32) -> Vec<bool> {
+        let mut out = vec![false; mask.len()];
+        for y in 0..h as i32 {
+            for x in 0..w as i32 {
+                'o: for dy in -r..=r {
                     let ny = y + dy;
-                    if ny < 0 || ny >= (h as i32) {
+                    if ny < 0 || ny >= h as i32 {
                         continue;
                     }
-                    let dy2 = dy * dy;
-                    for dx in -radius..=radius {
-                        if dx * dx + dy2 <= r2 {
-                            // Circular wrap on horizontal X coordinate!
-                            let nx = (x + dx).rem_euclid(w as i32) as u32;
-                            let idx = (ny as u32 * w + nx) as usize;
-                            if mask[idx] {
-                                found = true;
-                                break 'outer;
+                    for dx in -r..=r {
+                        if dx * dx + dy * dy <= r * r {
+                            let nx = (x + dx).rem_euclid(w as i32);
+                            if mask[(ny * w as i32 + nx) as usize] {
+                                out[(y * w as i32 + x) as usize] = true;
+                                break 'o;
                             }
                         }
                     }
                 }
-                row_out[x as usize] = found;
             }
-        });
+        }
+        out
+    }
 
-    result
-}
-
-/// Angular cluster centers in 360 space
-#[derive(Debug, Clone, Copy)]
-pub struct ClusterAngles {
-    pub angle_a: f32, // [0, 2*PI)
-    pub angle_b: f32, // [0, 2*PI)
-}
-
-/// Clusters the difference mask into two canonical angular centers on S^1.
-/// Guarantees canonical order: angle_a < angle_b.
-pub fn find_cluster_angles(mask: &[bool], w: u32, h: u32) -> ClusterAngles {
-    let mut points_cos_sin = Vec::new();
-    for y in 0..h {
-        for x in 0..w {
-            let idx = (y * w + x) as usize;
-            if mask[idx] {
-                let theta = 2.0 * PI * (x as f32) / (w as f32);
-                points_cos_sin.push((theta.cos(), theta.sin()));
-            }
+    #[test]
+    fn fast_dilation_matches_disk() {
+        let (w, h) = (64u32, 32u32);
+        let mut mask = vec![false; (w * h) as usize];
+        for &(x, y) in &[(0, 5), (63, 20), (30, 0), (31, 31), (10, 15)] {
+            mask[(y * w + x) as usize] = true;
+        }
+        for r in [1, 3, 7, 12] {
+            assert_eq!(dilate_mask_360(&mask, w, h, r), brute_dilate(&mask, w, h, r), "r={r}");
         }
     }
 
-    if points_cos_sin.len() < 20 {
-        return ClusterAngles {
-            angle_a: 0.0,
-            angle_b: PI,
-        };
+    #[test]
+    fn erosion_removes_specks() {
+        let (w, h) = (40u32, 20u32);
+        let mut mask = vec![false; (w * h) as usize];
+        mask[(5 * w + 5) as usize] = true; // одиночная точка
+        for y in 8..16 {
+            for x in 20..30 {
+                mask[(y * w + x) as usize] = true;
+            }
+        }
+        let opened = dilate_mask_360(&erode_mask_360(&mask, w, h, 1), w, h, 1);
+        assert!(!opened[(5 * w + 5) as usize]);
+        assert!(opened[(12 * w + 25) as usize]);
     }
 
-    // Deterministic antipodal initialization:
-    // Center 0 is initialized from the mean direction of all points
-    let (mut sum_cos, mut sum_sin) = (0.0f32, 0.0f32);
-    for &(c, s) in &points_cos_sin {
-        sum_cos += c;
-        sum_sin += s;
+    #[test]
+    fn circular_distance_wraps() {
+        assert!((circular_distance(0.1, 2.0 * PI - 0.1) - 0.2).abs() < 1e-5);
+        assert!((circular_distance(0.0, PI) - PI).abs() < 1e-5);
     }
-    let norm = (sum_cos * sum_cos + sum_sin * sum_sin).sqrt().max(1e-5);
-    let mut c0 = (sum_cos / norm, sum_sin / norm);
-    // Center 1 is antipodal opposite
-    let mut c1 = (-c0.0, -c0.1);
 
-    // Run circular k-means
-    for _ in 0..20 {
-        let (mut sum_c0, mut sum_s0, mut count0) = (0.0f32, 0.0f32, 0usize);
-        let (mut sum_c1, mut sum_s1, mut count1) = (0.0f32, 0.0f32, 0usize);
-
-        for &(c, s) in &points_cos_sin {
-            let dot0 = c * c0.0 + s * c0.1;
-            let dot1 = c * c1.0 + s * c1.1;
-            if dot0 >= dot1 {
-                sum_c0 += c;
-                sum_s0 += s;
-                count0 += 1;
+    /// Фон — горизонтальный градиент; «человек» стоит на первом кадре в одном месте, на втором — в другом.
+    fn scene(w: u32, h: u32, person_x: u32) -> RgbImage {
+        RgbImage::from_fn(w, h, |x, y| {
+            let px = (x as i64 - person_x as i64).rem_euclid(w as i64) as u32;
+            if px < w / 20 && y > h / 3 && y < h * 3 / 4 {
+                image::Rgb([200, 30, 40])
             } else {
-                sum_c1 += c;
-                sum_s1 += s;
-                count1 += 1;
+                image::Rgb([(x * 255 / w) as u8, 120, (y * 255 / h) as u8])
             }
-        }
-
-        if count0 > 0 {
-            let n0 = (sum_c0 * sum_c0 + sum_s0 * sum_s0).sqrt().max(1e-5);
-            c0 = (sum_c0 / n0, sum_s0 / n0);
-        }
-        if count1 > 0 {
-            let n1 = (sum_c1 * sum_c1 + sum_s1 * sum_s1).sqrt().max(1e-5);
-            c1 = (sum_c1 / n1, sum_s1 / n1);
-        }
+        })
     }
 
-    let mut ang0 = c0.1.atan2(c0.0).rem_euclid(2.0 * PI);
-    let mut ang1 = c1.1.atan2(c1.0).rem_euclid(2.0 * PI);
-
-    // Canonical sorting: always ang0 < ang1
-    if ang0 > ang1 {
-        std::mem::swap(&mut ang0, &mut ang1);
+    fn clean(w: u32, h: u32) -> RgbImage {
+        RgbImage::from_fn(w, h, |x, y| image::Rgb([(x * 255 / w) as u8, 120, (y * 255 / h) as u8]))
     }
 
-    ClusterAngles {
-        angle_a: ang0,
-        angle_b: ang1,
+    fn max_err(a: &RgbImage, b: &RgbImage) -> u8 {
+        a.pixels().zip(b.pixels()).map(|(p, q)| (0..3).map(|c| p[c].abs_diff(q[c])).max().unwrap()).max().unwrap()
+    }
+
+    #[test]
+    fn removes_person_with_one_of_two_swaps() {
+        let (w, h) = (400u32, 200u32);
+        // второй человек «переходит» через шов панорамы
+        let img1 = scene(w, h, 80);
+        let img2 = scene(w, h, 390);
+        let truth = clean(w, h);
+        let p = Params { dilate: 6, feather: 3, ..Params::default() };
+        let a = compute_preview(&img1, &img2, p);
+        let b = compute_preview(&img1, &img2, Params { swap: true, ..p });
+        let best = max_err(&a.result, &truth).min(max_err(&b.result, &truth));
+        assert!(best <= 2, "person left in the result, max error {best}");
+        // одна из зон около 80/400·360° ≈ 72°+, другая около шва
+        let deg = |r: f32| r.to_degrees();
+        let near = |a: f32, t: f32| circular_distance(a.to_radians(), t.to_radians()).to_degrees() < 15.0;
+        let (za, zb) = (deg(a.angles.angle_a), deg(a.angles.angle_b));
+        assert!((near(za, 81.0) && near(zb, 0.0)) || (near(zb, 81.0) && near(za, 0.0)), "{za} {zb}");
+    }
+
+    #[test]
+    fn export_matches_preview() {
+        let (w, h) = (400u32, 200u32);
+        let img1 = scene(w, h, 80);
+        let img2 = scene(w, h, 250);
+        let small1 = downscale(img1.clone(), 200);
+        let small2 = downscale(img2.clone(), 200);
+        let p = Params { dilate: 4, feather: 2, ..Params::default() };
+        let preview = compute_preview(&small1, &small2, p);
+        let mut full = img1.clone();
+        blend_into(&mut full, &img2, &preview.alpha);
+        let truth = clean(w, h);
+        let mut swapped = img1.clone();
+        blend_into(&mut swapped, &img2, &compute_preview(&small1, &small2, Params { swap: true, ..p }).alpha);
+        let best = max_err(&full, &truth).min(max_err(&swapped, &truth));
+        assert!(best <= 3, "full-size export differs from preview logic, max error {best}");
+    }
+
+    #[test]
+    fn identical_frames_change_nothing() {
+        let img = clean(200, 100);
+        let p = compute_preview(&img, &img, Params::default());
+        assert_eq!(p.changed, 0.0);
+        assert_eq!(max_err(&p.result, &img), 0);
     }
 }
 
-/// Blends img1 and img2 based on the difference mask and canonical cluster centers.
-/// If swap is false: Cluster A is replaced with img2, Cluster B with img1.
-/// If swap is true: Cluster B is replaced with img2, Cluster A with img1.
-/// Uses soft horizontal circular feathering for invisible seams.
-pub fn blend_panoramas(
-    img1: &RgbImage,
-    img2: &RgbImage,
-    mask: &[bool],
-    angles: ClusterAngles,
-    swap: bool,
-    feather_radius: i32,
-) -> RgbImage {
-    let (w, h) = img1.dimensions();
-    let mut target_mask = vec![false; (w * h) as usize];
+#[cfg(test)]
+mod perf {
+    use super::*;
 
-    // For every pixel in the mask, assign it to Cluster A or Cluster B
-    // purely based on circular distance to angle_a vs angle_b.
-    // This is 100% resolution invariant!
-    for y in 0..h {
-        for x in 0..w {
-            let idx = (y * w + x) as usize;
-            if mask[idx] {
-                let theta = 2.0 * PI * (x as f32) / (w as f32);
-                let dist_a = circular_distance(theta, angles.angle_a);
-                let dist_b = circular_distance(theta, angles.angle_b);
-                let is_cluster_a = dist_a <= dist_b;
-
-                // If not swap: Cluster A replaced by img2
-                // If swap: Cluster B replaced by img2
-                if (!swap && is_cluster_a) || (swap && !is_cluster_a) {
-                    target_mask[idx] = true;
-                }
-            }
-        }
-    }
-
-    // Compute smooth alpha map with circular horizontal wrapping
-    let alpha_map = if feather_radius > 0 {
-        compute_feathered_alpha(&target_mask, w, h, feather_radius)
-    } else {
-        target_mask.iter().map(|&b| if b { 1.0f32 } else { 0.0f32 }).collect()
-    };
-
-    let mut result = ImageBuffer::new(w, h);
-    let p1_raw = img1.as_raw();
-    let p2_raw = img2.as_raw();
-
-    result
-        .enumerate_rows_mut()
-        .par_bridge()
-        .for_each(|(y, row)| {
-            for (x, _, pixel) in row {
-                let idx = (y * w + x) as usize;
-                let a = alpha_map[idx];
-                let p1_idx = idx * 3;
-                let r1 = p1_raw[p1_idx] as f32;
-                let g1 = p1_raw[p1_idx + 1] as f32;
-                let b1 = p1_raw[p1_idx + 2] as f32;
-
-                let r2 = p2_raw[p1_idx] as f32;
-                let g2 = p2_raw[p1_idx + 1] as f32;
-                let b2 = p2_raw[p1_idx + 2] as f32;
-
-                let r = (1.0 - a) * r1 + a * r2;
-                let g = (1.0 - a) * g1 + a * g2;
-                let b = (1.0 - a) * b1 + a * b2;
-
-                *pixel = Rgb([r.round() as u8, g.round() as u8, b.round() as u8]);
-            }
-        });
-
-    result
-}
-
-/// Horizontal circular box/gaussian blur approximation for smooth feathering
-fn compute_feathered_alpha(mask: &[bool], w: u32, h: u32, radius: i32) -> Vec<f32> {
-    let alpha: Vec<f32> = mask.iter().map(|&b| if b { 1.0f32 } else { 0.0f32 }).collect();
-    if radius <= 0 {
-        return alpha;
-    }
-
-    let r = radius.min(50);
-    let diameter = (2 * r + 1) as f32;
-
-    // Horizontal pass with circular wrap-around
-    let mut temp = vec![0.0f32; (w * h) as usize];
-    temp.par_chunks_mut(w as usize)
-        .enumerate()
-        .for_each(|(y_idx, row_out)| {
-            let y = y_idx as u32;
-            let row_in = &alpha[(y * w) as usize..((y + 1) * w) as usize];
-            let mut sum = 0.0f32;
-            for dx in -r..=r {
-                let x = dx.rem_euclid(w as i32) as usize;
-                sum += row_in[x];
-            }
-            row_out[0] = sum / diameter;
-
-            for x in 1..w {
-                let add_x = (x as i32 + r).rem_euclid(w as i32) as usize;
-                let rem_x = (x as i32 - r - 1).rem_euclid(w as i32) as usize;
-                sum += row_in[add_x] - row_in[rem_x];
-                row_out[x as usize] = (sum / diameter).clamp(0.0, 1.0);
-            }
-        });
-
-    // Vertical pass with clamp
-    let mut result = vec![0.0f32; (w * h) as usize];
-    result
-        .par_chunks_mut(w as usize)
-        .enumerate()
-        .for_each(|(y_idx, row_out)| {
-            let y = y_idx as i32;
-            for x in 0..w {
-                let mut sum = 0.0f32;
-                let mut count = 0;
-                for dy in -r..=r {
-                    let ny = y + dy;
-                    if ny >= 0 && ny < (h as i32) {
-                        sum += temp[(ny as u32 * w + x) as usize];
-                        count += 1;
-                    }
-                }
-                row_out[x as usize] = (sum / (count as f32)).clamp(0.0, 1.0);
-            }
-        });
-
-    result
-}
-
-/// Create colored visualization of the detected masks (Zone A = Cyan, Zone B = Red)
-pub fn create_mask_visualization(
-    mask: &[bool],
-    w: u32,
-    h: u32,
-    angles: ClusterAngles,
-) -> RgbImage {
-    let mut vis = ImageBuffer::new(w, h);
-    for y in 0..h {
-        for x in 0..w {
-            let idx = (y * w + x) as usize;
-            if mask[idx] {
-                let theta = 2.0 * PI * (x as f32) / (w as f32);
-                let dist_a = circular_distance(theta, angles.angle_a);
-                let dist_b = circular_distance(theta, angles.angle_b);
-                if dist_a <= dist_b {
-                    vis.put_pixel(x, y, Rgb([56, 189, 248])); // Zone A: Cyan
+    /// `cargo test --release -- --ignored --nocapture perf`: время расчёта превью и экспорта 8K.
+    #[test]
+    #[ignore]
+    fn timings() {
+        let make = |px: u32, w: u32, h: u32| {
+            RgbImage::from_fn(w, h, |x, y| {
+                let n = ((x.wrapping_mul(7919) ^ y.wrapping_mul(104729)) % 7) as u8; // шум
+                if x.abs_diff(px) < w / 25 && y > h / 3 {
+                    image::Rgb([200, 40, 40])
                 } else {
-                    vis.put_pixel(x, y, Rgb([239, 68, 68]));  // Zone B: Red
+                    image::Rgb([(x % 256) as u8 / 2 + n, 120 + n, (y % 256) as u8 / 2])
                 }
-            } else {
-                vis.put_pixel(x, y, Rgb([15, 23, 42])); // Dark Background
-            }
-        }
+            })
+        };
+        let (a, b) = (make(300, 1400, 700), make(900, 1400, 700));
+        let t = std::time::Instant::now();
+        let p = compute_preview(&a, &b, Params { dilate: 60, feather: 50, ..Params::default() });
+        println!("preview 1400×700, r=60: {:?}", t.elapsed());
+        let (mut fa, fb) = (make(1700, 8000, 4000), make(5100, 8000, 4000));
+        let t = std::time::Instant::now();
+        blend_into(&mut fa, &fb, &p.alpha);
+        println!("blend 8000×4000: {:?}", t.elapsed());
     }
-    vis
 }

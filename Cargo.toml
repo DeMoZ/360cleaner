@@ -1,22 +1,29 @@
 [package]
 name = "cleaner360"
-version = "0.2.0"
-edition = "2021"
-authors = ["Roman <DeMoZ>"]
-description = "Fast 360 Photo Person Remover in Rust without AI"
+version = "0.3.0"
+edition = "2024"
+authors = ["DeMoZ"]
+description = "Убирает фотографа и людей с 360° панорамы по двум кадрам, без нейросетей"
+repository = "https://github.com/DeMoZ/360cleaner"
+license = "MIT"
+publish = false
 
 [dependencies]
 tao = "0.37"
 wry = "0.57"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
 rayon = "1.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 base64 = "0.22"
 rfd = "0.15"
+sha2 = "0.10"
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
-panic = "abort"
+strip = true
