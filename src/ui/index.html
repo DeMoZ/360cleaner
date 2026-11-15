@@ -244,6 +244,13 @@ body {
   min-width: 28px;
   text-align: right;
 }
+.size-est {
+  margin-left: auto;
+  margin-right: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
@@ -826,9 +833,10 @@ body.drag-on .photo-strip { border-top-color: var(--accent-blue); }
       <div class="slider-block">
         <div class="slider-row">
           <span class="slider-name" data-i18n="exportQuality"></span>
+          <span class="size-est" id="v_size" data-i18n-title="sizeEstimateTip"></span>
           <span class="slider-val" id="v_quality">85</span>
         </div>
-        <input type="range" id="quality" min="50" max="100" value="85" oninput="$('v_quality').textContent=this.value" onchange="sendExportOptions()">
+        <input type="range" id="quality" min="50" max="100" value="85" oninput="$('v_quality').textContent=this.value; renderSizeEstimate()" onchange="sendExportOptions()">
       </div>
       <div class="hint" data-i18n="exportTip"></div>
       <button class="btn btn-emerald" id="saveBtn" onclick="saveResult()" disabled>
@@ -979,6 +987,7 @@ function applyLanguage() {
   document.documentElement.lang = lang === 'zh' ? 'zh-Hans' : lang;
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
   document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  renderSizeEstimate();
   for (const o of $('aspectSelect').options) {
     const label = o.dataset.label ? t(o.dataset.label) : o.dataset.fixed;
     o.textContent = o.value.replace('/', ' : ') + ' — ' + label;
@@ -1024,6 +1033,8 @@ const photoSrc = {};
 let colors = [];
 let exportWidths = [8192, 6144, 5120, 4096, 2048];
 let exportWidth = 0;
+/** Примерный вес файла по качеству: { id первого фото, width, sizes: { "85": байты, … } } от Rust. */
+let sizeEstimate = null;
 let hasPreview = false;
 let stackInfo = null;
 let appVersion = '';
@@ -1132,6 +1143,11 @@ window.onRustMessage = function (msg) {
       else setStatus('stStackDone', { n: msg.count }, 'ready');
       renderPhotos();
       updateButtons();
+      break;
+
+    case 'size_estimate':
+      sizeEstimate = msg;
+      renderSizeEstimate();
       break;
 
     case 'save_success':
@@ -1291,6 +1307,20 @@ function renderSizes() {
   }
   // сохранённый размер больше исходного — это и есть исходный
   sel.value = [...sel.options].some(o => o.value === String(exportWidth)) ? String(exportWidth) : '0';
+  renderSizeEstimate();
+}
+
+/** Вес файла у ползунка качества; пока считается для нового фото или размера — «…». */
+function renderSizeEstimate() {
+  const el = $('v_size');
+  const first = photos[0];
+  if (!first) { el.textContent = ''; return; }
+  const e = sizeEstimate;
+  if (!e || e.id !== first.id || e.width !== exportWidth) { el.textContent = '…'; return; }
+  const bytes = e.sizes && e.sizes[$('quality').value];
+  if (!bytes) { el.textContent = ''; return; }
+  const mb = bytes / 1048576;
+  el.textContent = t('sizeEstimate', { mb: mb.toFixed(mb < 1 ? 2 : 1) });
 }
 
 function exportOptions() {
@@ -1302,6 +1332,7 @@ function sendExportOptions() {
   // пункта нет, потому что фото меньше: настройку не трогаем
   if (o.size !== 0 || exportWidth === 0 || [...$('exportSize').options].some(x => x.value === String(exportWidth))) exportWidth = o.size;
   send('export_options', { size: exportWidth, quality: o.quality });
+  renderSizeEstimate();
 }
 
 function saveResult() {

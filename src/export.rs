@@ -96,6 +96,58 @@ pub fn export(paths: &[PathBuf], alphas: &[Alpha], options: Options, out: &Path)
     Ok(Saved { width: w, height: h, bytes: bytes.len() as u64 })
 }
 
+/// Сколько пикселей результата сжимается для оценки веса: больше — точнее, но дольше.
+const ESTIMATE_PIXELS: u64 = 2_000_000;
+/// Сторона куска выборки: кратна 16, так что блоки JPEG (и цвета при 4:2:0) не ложатся на стык кусков.
+const ESTIMATE_TILE: u32 = 128;
+
+/// Выборка для оценки веса: результат целиком, если он небольшой, иначе куски `ESTIMATE_TILE` равномерной
+/// сеткой по всей панораме, сложенные в одну картинку. Второе число — во сколько раз результат больше выборки.
+pub fn estimate_sample(img: &RgbImage) -> (RgbImage, f64) {
+    let (w, h) = img.dimensions();
+    let total = w as u64 * h as u64;
+    let t = ESTIMATE_TILE;
+    if total <= ESTIMATE_PIXELS * 2 || w < t * 4 || h < t * 2 {
+        return (img.clone(), 1.0);
+    }
+    // сетка с теми же пропорциями, что у панорамы
+    let tiles = (ESTIMATE_PIXELS / (t as u64 * t as u64)).max(8) as f64;
+    let cols = ((tiles * w as f64 / h as f64).sqrt().round() as u32).clamp(2, w / t);
+    let rows = ((tiles / cols as f64).round() as u32).clamp(1, h / t);
+    let mut sample = RgbImage::new(cols * t, rows * t);
+    for r in 0..rows {
+        for c in 0..cols {
+            // середина клетки сетки, выровненная по 16
+            let x =
+                ((((2 * c + 1) as u64 * w as u64 / (2 * cols as u64)) as u32).saturating_sub(t / 2) & !15).min(w - t);
+            let y =
+                ((((2 * r + 1) as u64 * h as u64 / (2 * rows as u64)) as u32).saturating_sub(t / 2) & !15).min(h - t);
+            let tile = image::imageops::crop_imm(img, x, y, t, t).to_image();
+            image::imageops::replace(&mut sample, &tile, (c * t) as i64, (r * t) as i64);
+        }
+    }
+    let scale = total as f64 / (sample.width() as u64 * sample.height() as u64) as f64;
+    (sample, scale)
+}
+
+/// Примерный вес сохранённого файла при каждом качестве из `qualities`: первое фото в размере результата,
+/// сжатое так же, как при сохранении (по выборке), плюс метаданные. Люди на фото на вес почти не влияют.
+pub fn estimate_sizes(first: &Path, width: u32, qualities: &[u8]) -> Result<Vec<(u8, u64)>, String> {
+    use rayon::prelude::*;
+    let img = processor::load_image(first, None)?;
+    let (w0, h0) = img.dimensions();
+    let (w, h) = target_dims(w0, h0, width);
+    let img = resize_to(img, w, h)?;
+    let (sample, scale) = estimate_sample(&img);
+    drop(img);
+    let markers = std::fs::read(first).map(|b| xmp::extract_jpeg_markers(&b)).unwrap_or_default();
+    let meta: u64 = xmp::scale_gpano(markers, (w0, h0), (w, h)).iter().map(|m| m.len() as u64).sum();
+    qualities
+        .par_iter()
+        .map(|&q| encode_jpeg(&sample, q).map(|j| (q, (j.len() as f64 * scale).round() as u64 + meta)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +247,38 @@ mod tests {
     }
 
     #[test]
+    fn sample_is_whole_small_image_or_tiles_of_large() {
+        let small = frame(1600, 800, 300);
+        let (s, k) = estimate_sample(&small);
+        assert_eq!((s.dimensions(), k), ((1600, 800), 1.0));
+        let big = frame(8192, 4096, 2000);
+        let (s, k) = estimate_sample(&big);
+        let px = s.width() as u64 * s.height() as u64;
+        assert!(px > 1_500_000 && px < 2_600_000, "sample {}×{}", s.width(), s.height());
+        assert!((k - 8192.0 * 4096.0 / px as f64).abs() < 1e-9);
+        assert_eq!((s.width() % ESTIMATE_TILE, s.height() % ESTIMATE_TILE), (0, 0));
+    }
+
+    #[test]
+    fn estimate_close_to_saved_size() {
+        let dir = temp_dir("estimate");
+        let (w, h) = (6000u32, 3000u32);
+        // мелкий узор, чтобы вес зависел от качества
+        let img = RgbImage::from_fn(w, h, |x, y| {
+            let v = ((x * 7 + y * 13) ^ (x / 3 * y / 5)) as u8;
+            image::Rgb([v, v.wrapping_mul(3), (x / 20) as u8])
+        });
+        let (a, out) = (dir.0.join("a.jpg"), dir.0.join("out.jpg"));
+        std::fs::write(&a, jpeg(&img)).unwrap();
+        let est = estimate_sizes(&a, 4096, &[60, 85, 95]).unwrap();
+        for (q, bytes) in est {
+            let saved = export(std::slice::from_ref(&a), &[], Options { width: 4096, quality: q }, &out).unwrap();
+            let err = bytes as f64 / saved.bytes as f64 - 1.0;
+            assert!(err.abs() < 0.1, "q{q}: estimate {bytes}, saved {}", saved.bytes);
+        }
+    }
+
+    #[test]
     fn stack_export_removes_passers_by() {
         let dir = temp_dir("stack");
         let (w, h) = (800u32, 400u32);
@@ -233,7 +317,19 @@ mod perf {
             let t = std::time::Instant::now();
             let s = export(std::slice::from_ref(&src), &[], Options { width, quality }, &out).unwrap();
             println!("{}×{} q{quality}: {:.2} MB, {:?}", s.width, s.height, s.bytes as f64 / 1_048_576.0, t.elapsed());
+            let t = std::time::Instant::now();
+            let est = estimate_sizes(&src, width, &[quality]).unwrap()[0].1;
+            println!(
+                "  estimate {:.2} MB ({:+.1}%), {:?}",
+                est as f64 / 1_048_576.0,
+                (est as f64 / s.bytes as f64 - 1.0) * 100.0,
+                t.elapsed()
+            );
         }
+        let t = std::time::Instant::now();
+        let all: Vec<u8> = (crate::settings::MIN_QUALITY..=100).collect();
+        estimate_sizes(&src, 0, &all).unwrap();
+        println!("estimate for q{}–100 at full size: {:?}", all[0], t.elapsed());
         let _ = std::fs::remove_file(out);
     }
 }
