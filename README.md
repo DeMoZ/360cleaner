@@ -104,7 +104,7 @@ quality 95 and up). The panorama sizes in the GPano metadata are updated to matc
 | **Seam softness** | Width of the smooth blend between shots. |
 | **Swap zones** | Two photos only: swaps which shot each of the two zones comes from. |
 | **Difference map** | Two photos: blue zone A and red zone B, where people were found. Three or more: each area in the color of the shot it was taken from (the same dot as in the photo list). |
-| **Size, JPEG quality** | How to save the result. No upscaling: sizes larger than the original aren't offered. |
+| **Size, JPEG quality** | How to save the result. No upscaling: sizes larger than the original aren't offered. Next to the quality, the approximate file size is shown while you move the slider. |
 | **360° sphere** | Interactive view: drag with the mouse, scroll to zoom. <kbd>Space</kbd> toggles it. |
 | **Aspect ratio** | 2:1, 16:9, 4:3, 1:1, 9:16 or 4:5 frame, for viewing only. |
 
