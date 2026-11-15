@@ -116,6 +116,8 @@ struct State {
     donations: Vec<u8>,
     donations_loading: bool,
     updates: UpdateState,
+    /// Запрос пересчитать примерный вес файла (`estimate_worker`).
+    estimate: Sender<()>,
 }
 
 type Shared = Arc<Mutex<State>>;
@@ -185,6 +187,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         feather: settings.feather.clamp(2, 50),
         swap: false,
     };
+    let (estimate_tx, estimate_rx) = channel::<()>();
     let state: Shared = Arc::new(Mutex::new(State {
         photos: Vec::new(),
         next_id: 1,
@@ -198,12 +201,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         donations: donations::cached(),
         donations_loading: false,
         updates: UpdateState::default(),
+        estimate: estimate_tx,
     }));
 
     let (compute_tx, compute_rx) = channel::<()>();
     {
         let (state, ui) = (Arc::clone(&state), ui.clone());
         std::thread::spawn(move || compute_worker(compute_rx, state, ui));
+    }
+    {
+        let (state, ui) = (Arc::clone(&state), ui.clone());
+        std::thread::spawn(move || estimate_worker(estimate_rx, state, ui));
     }
     let loader = start_loaders(&state, &ui, &compute_tx);
 
@@ -305,6 +313,7 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
                 check_updates(state, ui, false);
             }
             ui.send(photos_msg(&lock(state)));
+            let _ = lock(state).estimate.send(());
             // фото из командной строки: `360Cleaner a.jpg b.jpg`
             let paths: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).filter(|p| p.is_file()).collect();
             if !paths.is_empty() {
@@ -422,6 +431,9 @@ fn set_export_options(st: &mut State, req: &Request) {
     if (s.export_width, s.export_quality) != (old_w, old_q) {
         s.save();
     }
+    if s.export_width != old_w {
+        let _ = st.estimate.send(());
+    }
 }
 
 // ---------------------------------------------------------------- фото
@@ -449,6 +461,7 @@ fn photos_changed(st: &mut State, ui: &Ui) {
     st.generation += 1;
     st.computed = None;
     ui.send(photos_msg(st));
+    let _ = st.estimate.send(());
 }
 
 /// Новые фото — в конец списка; уже добавленные пропускаются. Расчёт запустится, когда откроется последнее.
@@ -606,6 +619,36 @@ fn compute_worker(rx: Receiver<()>, state: Shared, ui: Ui) {
         msg["result_b64"] = json!(jpeg_b64(&result, 90));
         msg["mask_b64"] = json!(mask.map(|m| jpeg_b64(&m, 85)));
         ui.send(msg);
+    }
+}
+
+/// Примерный вес файла при каждом качестве от `MIN_QUALITY` до 100 — для подписи у ползунка качества.
+/// Зависит только от первого фото и размера результата; из накопившихся запросов нужен последний.
+fn estimate_worker(rx: Receiver<()>, state: Shared, ui: Ui) {
+    let qualities: Vec<u8> = (settings::MIN_QUALITY..=100).collect();
+    let mut done: Option<(Option<u64>, u32)> = None;
+    while rx.recv().is_ok() {
+        while rx.try_recv().is_ok() {}
+        let (first, width) = {
+            let st = lock(&state);
+            (st.photos.first().map(|p| (p.id, p.path.clone())), st.settings.export_width)
+        };
+        let key = (first.as_ref().map(|f| f.0), width);
+        if done == Some(key) {
+            continue;
+        }
+        done = Some(key);
+        let sizes = match &first {
+            None => Value::Null,
+            Some((_, path)) => match export::estimate_sizes(path, width, &qualities) {
+                Ok(list) => list.into_iter().map(|(q, bytes)| (q.to_string(), json!(bytes))).collect(),
+                Err(e) => {
+                    eprintln!("size estimate: {e}");
+                    Value::Null
+                }
+            },
+        };
+        ui.send(json!({"type": "size_estimate", "id": key.0, "width": width, "sizes": sizes}));
     }
 }
 
