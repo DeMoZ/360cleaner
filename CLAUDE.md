@@ -65,7 +65,9 @@ Rust (edition 2024) + tao 0.37 / wry 0.57 (системный WebView: WKWebView
 - Windows с Mac: `cargo check --target x86_64-pc-windows-msvc`. На настоящей Windows программа не проверялась.
 - Сборка Mac: `scripts/build-macos.sh` (только Apple Silicon). Значок: `scripts/make-icon.sh` → `assets/`.
 - Релиз: `version` в `Cargo.toml` + `docs/releases/v<версия>.md` + тег `v<версия>` на main (CI сверяет тег с
-  версией и выкладывает .dmg и оба .zip).
+  версией и выкладывает .dmg и Mac .zip). Windows .zip — только по явной просьбе: переменная репозитория
+  `RELEASE_WINDOWS=true` (`gh variable set` до тега, `gh variable delete` после); без неё Windows в CI только
+  проходит тесты и clippy, а в заметках к релизу раздела Windows нет.
 - Языки (`i18n.rs`, `ui/i18n.js`): en, ru, es, pt, de, fr, zh, ja; язык системы через `sys-locale`, иначе en;
   выбор в настройке `language` (пусто — системный). Все тексты окна — в словаре `I18N` (`ui/i18n.js`, Rust
   подставляет его в страницу вместо `/*I18N*/`). Rust шлёт в окно ключи (`ui.status("stLoading", json!{…})`),
