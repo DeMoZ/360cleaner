@@ -100,6 +100,19 @@ fn scale_segment(seg: &[u8], from: (u32, u32), to: (u32, u32)) -> Option<Vec<u8>
     Some(out)
 }
 
+/// Сегменты без XMP (и его продолжений): для граней кубической карты, которые уже не сферическая панорама —
+/// иначе просмотрщики по GPano приняли бы квадрат за 360°. EXIF и ICC остаются.
+pub fn without_xmp(markers: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+    markers
+        .into_iter()
+        .filter(|seg| {
+            !(seg.len() > 4 && seg[1] == 0xE1 && (seg[4..].starts_with(XMP_NS) || seg[4..].starts_with(XMP_EXT_NS)))
+        })
+        .collect()
+}
+
+const XMP_EXT_NS: &[u8] = b"http://ns.adobe.com/xmp/extension/\0";
+
 /// Заменяет число после `key` в обеих записях XMP: атрибутом `key="123"` и элементом `<key>123</key>`.
 fn replace_numbers(text: &str, key: &str, f: impl Fn(u64) -> u64) -> String {
     let mut out = String::with_capacity(text.len());
@@ -178,6 +191,15 @@ mod tests {
         let out = scale_gpano(vec![xmp(15520, 7760), exif.clone()], (15520, 7760), (8192, 4096));
         assert_eq!(out, vec![xmp(8192, 4096), exif.clone()]);
         assert_eq!(scale_gpano(vec![exif.clone()], (100, 50), (100, 50)), vec![exif]);
+    }
+
+    #[test]
+    fn drops_xmp_keeps_exif_and_icc() {
+        let exif = seg(0xE1, b"Exif\0\0MM");
+        let icc = seg(0xE2, b"ICC_PROFILE\0..");
+        let xmp = seg(0xE1, b"http://ns.adobe.com/xap/1.0/\0<GPano/>");
+        let ext = seg(0xE1, b"http://ns.adobe.com/xmp/extension/\0ABCD");
+        assert_eq!(without_xmp(vec![exif.clone(), xmp, icc.clone(), ext]), vec![exif, icc]);
     }
 
     #[test]
