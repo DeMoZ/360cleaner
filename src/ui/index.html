@@ -823,6 +823,18 @@ body.drag-on .photo-strip { border-top-color: var(--accent-blue); }
 
     <div class="sidebar-section">
       <div class="section-label" data-i18n="secExport"></div>
+      <div class="slider-block" data-i18n-title="formatTip">
+        <div class="slider-row"><span class="slider-name" data-i18n="exportFormat"></span></div>
+        <div class="select-wrapper">
+          <select class="aspect-select" id="exportFormat" onchange="renderSizes(); sendExportOptions()">
+            <option value="equirect" data-i18n="formatEquirect"></option>
+            <option value="cube" data-i18n="formatCube"></option>
+            <option value="strip" data-i18n="formatStrip"></option>
+            <option value="cross" data-i18n="formatCross"></option>
+          </select>
+          <span class="select-arrow">▾</span>
+        </div>
+      </div>
       <div class="slider-block">
         <div class="slider-row"><span class="slider-name" data-i18n="exportSize"></span></div>
         <div class="select-wrapper">
@@ -1033,7 +1045,9 @@ const photoSrc = {};
 let colors = [];
 let exportWidths = [8192, 6144, 5120, 4096, 2048];
 let exportWidth = 0;
-/** Примерный вес файла по качеству: { id первого фото, width, sizes: { "85": байты, … } } от Rust. */
+/** Что сохранять: equirect — панорама, cube — шесть файлов граней, strip — полоса 6×1, cross — крест 4×3. */
+let exportFormat = 'equirect';
+/** Примерный вес файла по качеству: { id первого фото, width, format, sizes: { "85": байты, … } } от Rust. */
 let sizeEstimate = null;
 let hasPreview = false;
 let stackInfo = null;
@@ -1071,6 +1085,8 @@ window.onRustMessage = function (msg) {
       colors = msg.colors || [];
       exportWidths = msg.exportWidths || exportWidths;
       exportWidth = msg.exportWidth || 0;
+      exportFormat = msg.exportFormat || 'equirect';
+      $('exportFormat').value = exportFormat;
       $('quality').value = msg.exportQuality || 85;
       $('v_quality').textContent = $('quality').value;
       applyLanguage();
@@ -1153,7 +1169,7 @@ window.onRustMessage = function (msg) {
     case 'save_success':
       showLoading(false);
       setStatus('stSaved', { name: msg.name }, 'ready');
-      toast(esc(t('savedToast', { name: msg.name, mb: msg.mb, w: msg.w, h: msg.h })), 'ok', [[t('showInFolder'), () => send('reveal')]], true);
+      toast(esc(t(msg.files > 1 ? 'savedFacesToast' : 'savedToast', { name: msg.name, mb: msg.mb, w: msg.w, h: msg.h, n: msg.files })), 'ok', [[t('showInFolder'), () => send('reveal')]], true);
       break;
 
     case 'warning':
@@ -1287,6 +1303,17 @@ function renderPhotos() {
   renderSizes();
 }
 
+/** Подпись размера: у панорамы — её размер, у кубической карты — грани (сторона — четверть ширины) или файла. */
+function sizeLabel(w, h) {
+  const n = Math.round(w / 4);
+  switch ($('exportFormat').value) {
+    case 'cube': return `6 × ${n}×${n}`;
+    case 'strip': return `${6 * n}×${n}`;
+    case 'cross': return `${4 * n}×${3 * n}`;
+    default: return `${w}×${h}`;
+  }
+}
+
 /** Размеры для сохранения: исходный и стандартные ширины меньше него. */
 function renderSizes() {
   const sel = $('exportSize');
@@ -1296,13 +1323,13 @@ function renderSizes() {
   sel.innerHTML = '';
   const orig = document.createElement('option');
   orig.value = '0';
-  orig.textContent = t('sizeOriginal') + (first && first.size ? ` · ${first.size}` : '');
+  orig.textContent = t('sizeOriginal') + (first && first.width ? ` · ${sizeLabel(first.width, Math.round(first.width * ratio))}` : '');
   sel.appendChild(orig);
   for (const w of exportWidths) {
     if (w0 && w >= w0) continue;
     const o = document.createElement('option');
     o.value = String(w);
-    o.textContent = `${SIZE_NAMES[w] || w} · ${w}×${Math.round(w * ratio)}`;
+    o.textContent = `${SIZE_NAMES[w] || w} · ${sizeLabel(w, Math.round(w * ratio))}`;
     sel.appendChild(o);
   }
   // сохранённый размер больше исходного — это и есть исходный
@@ -1316,7 +1343,7 @@ function renderSizeEstimate() {
   const first = photos[0];
   if (!first) { el.textContent = ''; return; }
   const e = sizeEstimate;
-  if (!e || e.id !== first.id || e.width !== exportWidth) { el.textContent = '…'; return; }
+  if (!e || e.id !== first.id || e.width !== exportWidth || e.format !== exportFormat) { el.textContent = '…'; return; }
   const bytes = e.sizes && e.sizes[$('quality').value];
   if (!bytes) { el.textContent = ''; return; }
   const mb = bytes / 1048576;
@@ -1324,21 +1351,22 @@ function renderSizeEstimate() {
 }
 
 function exportOptions() {
-  return { size: +$('exportSize').value, quality: +$('quality').value };
+  return { size: +$('exportSize').value, quality: +$('quality').value, format: $('exportFormat').value };
 }
 
 function sendExportOptions() {
   const o = exportOptions();
   // пункта нет, потому что фото меньше: настройку не трогаем
   if (o.size !== 0 || exportWidth === 0 || [...$('exportSize').options].some(x => x.value === String(exportWidth))) exportWidth = o.size;
-  send('export_options', { size: exportWidth, quality: o.quality });
+  exportFormat = o.format;
+  send('export_options', { size: exportWidth, quality: o.quality, format: o.format });
   renderSizeEstimate();
 }
 
 function saveResult() {
   if (!hasPreview) return;
   const o = exportOptions();
-  send('save', { size: o.size, quality: o.quality });
+  send('save', { size: o.size, quality: o.quality, format: o.format });
 }
 
 function switchTab(tab) {

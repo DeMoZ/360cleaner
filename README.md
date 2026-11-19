@@ -73,7 +73,7 @@ After that the app updates itself: the version button in the top-right corner, p
 3. **Drop the photos** into the window (all at once), or click the field at the top. They appear in the list at the
    bottom: click one to view it, ✕ removes it, **Clear list** removes all.
 4. With two photos, if you're still in the picture, press **Swap zones** (key <kbd>S</kbd>).
-5. Pick the **size** and **quality**, then **Save 360°**.
+5. Pick the **format**, **size** and **quality**, then **Save 360°**.
 
 > [!TIP]
 > It works best when nothing changes between shots except people: fixed exposure (manual mode), no wind.
@@ -95,6 +95,21 @@ shows about a quarter of the circle on screen at a time, so **6K–8K is enough 
 The app downscales with Lanczos and writes a progressive JPEG with optimized tables and 4:2:0 color (4:4:4 at
 quality 95 and up). The panorama sizes in the GPano metadata are updated to match.
 
+## 🧊 Cubemap
+
+Instead of the 2:1 panorama you can save a **cubemap**: six square 90° views for game engines and 3D viewers
+(Unity, three.js, krpano, Pannellum). The face side is a quarter of the panorama width (an 8K panorama gives
+2048×2048 faces), so the detail is the same as at the panorama's equator.
+
+| Format | What you get |
+| :--- | :--- |
+| **6 files** | `name_f.jpg`, `_r`, `_b`, `_l`, `_u`, `_d`: front, right, back, left, up, down (krpano and Pannellum names). |
+| **Strip 6×1** | One file, faces in the order right, left, up, down, front, back (+X −X +Y −Y +Z −Z, as Unity expects). |
+| **Cross 4×3** | One file: up and down above and below the front face, empty cells black. |
+
+Front is the middle of the panorama. The top of the up face and the bottom of the down face point backwards. EXIF
+and the ICC profile are kept; GPano isn't written, since a face is no longer a sphere.
+
 ## 🎛 Settings
 
 | Setting | What it does |
@@ -104,6 +119,7 @@ quality 95 and up). The panorama sizes in the GPano metadata are updated to matc
 | **Seam softness** | Width of the smooth blend between shots. |
 | **Swap zones** | Two photos only: swaps which shot each of the two zones comes from. |
 | **Difference map** | Two photos: blue zone A and red zone B, where people were found. Three or more: each area in the color of the shot it was taken from (the same dot as in the photo list). |
+| **Format** | 360° panorama or a cubemap: 6 files, strip 6×1 or cross 4×3 (see above). |
 | **Size, JPEG quality** | How to save the result. No upscaling: sizes larger than the original aren't offered. Next to the quality, the approximate file size is shown while you move the slider. |
 | **360° sphere** | Interactive view: drag with the mouse, scroll to zoom. <kbd>Space</kbd> toggles it. |
 | **Aspect ratio** | 2:1, 16:9, 4:3, 1:1, 9:16 or 4:5 frame, for viewing only. |

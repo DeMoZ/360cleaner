@@ -1,6 +1,8 @@
 //! Сохранение панорамы в полном размере или уменьшенной: смешивание кадров по маскам превью, уменьшение,
-//! JPEG с выбранным качеством, перенос метаданных 360° (размеры GPano пересчитываются).
+//! JPEG с выбранным качеством, перенос метаданных 360° (размеры GPano пересчитываются). Вместо панорамы можно
+//! сохранить кубическую карту: шесть файлов граней, полосу 6×1 или крест 4×3 (`cubemap`).
 
+use crate::cubemap::{self, Cell, Face};
 use crate::processor::{self, Alpha};
 use crate::xmp;
 use fast_image_resize::images::Image;
@@ -12,12 +14,93 @@ use std::path::{Path, PathBuf};
 /// Ширины для выбора в окне, по убыванию. 0 — исходный размер.
 pub const WIDTHS: [u32; 5] = [8192, 6144, 5120, 4096, 2048];
 
+/// Что сохранять. В настройках и окне — строкой (`name`); незнакомая строка — панорама.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum Format {
+    /// Панорама 2:1, как исходные фото.
+    #[default]
+    Equirect,
+    /// Шесть файлов граней `_f _r _b _l _u _d`.
+    CubeFiles,
+    /// Один файл: грани полосой 6×1.
+    CubeStrip,
+    /// Один файл: грани крестом 4×3.
+    CubeCross,
+}
+
+impl Format {
+    pub fn name(self) -> &'static str {
+        match self {
+            Format::Equirect => "equirect",
+            Format::CubeFiles => "cube",
+            Format::CubeStrip => "strip",
+            Format::CubeCross => "cross",
+        }
+    }
+
+    /// Окончание имени файла по умолчанию.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Format::Equirect => "",
+            Format::CubeFiles => "_cube",
+            Format::CubeStrip => "_cubestrip",
+            Format::CubeCross => "_cubecross",
+        }
+    }
+
+    /// Расположение граней в файле; у панорамы и отдельных файлов — нет.
+    fn cells(self) -> Option<&'static [Cell]> {
+        match self {
+            Format::CubeStrip => Some(&cubemap::STRIP),
+            Format::CubeCross => Some(&cubemap::CROSS),
+            _ => None,
+        }
+    }
+}
+
+impl From<String> for Format {
+    fn from(s: String) -> Self {
+        [Format::CubeFiles, Format::CubeStrip, Format::CubeCross]
+            .into_iter()
+            .find(|f| f.name() == s)
+            .unwrap_or_default()
+    }
+}
+
+impl From<Format> for String {
+    fn from(f: Format) -> Self {
+        f.name().to_string()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Options {
-    /// Ширина результата; 0 или не меньше исходной — исходный размер (увеличения нет).
+    /// Ширина панорамы; 0 или не меньше исходной — исходный размер (увеличения нет). У кубической карты сторона
+    /// грани — четверть этой ширины.
     pub width: u32,
     /// Качество JPEG 1–100.
     pub quality: u8,
+    pub format: Format,
+}
+
+/// Файлы, которые запишет сохранение в `out`: сам `out`, а у отдельных граней — `имя_f.jpg` … `имя_d.jpg` рядом.
+pub fn output_paths(out: &Path, format: Format) -> Vec<PathBuf> {
+    if format != Format::CubeFiles {
+        return vec![out.to_path_buf()];
+    }
+    let stem = out.file_stem().unwrap_or_default().to_string_lossy();
+    Face::ALL.iter().map(|f| out.with_file_name(format!("{stem}_{}.jpg", f.suffix()))).collect()
+}
+
+/// Сначала во временный файл рядом, потом переименование: при сбое старый файл не испортится.
+fn write_file(out: &Path, bytes: &[u8]) -> Result<(), String> {
+    let tmp = out.with_extension("jpg.part");
+    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, out).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
 }
 
 /// Размер результата для кадра `w`×`h`: пропорции сохраняются.
@@ -58,12 +141,13 @@ pub fn encode_jpeg(img: &RgbImage, quality: u8) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-/// Итог сохранения.
+/// Итог сохранения: размер одного файла и вес всех вместе.
 #[derive(Debug)]
 pub struct Saved {
     pub width: u32,
     pub height: u32,
     pub bytes: u64,
+    pub files: Vec<PathBuf>,
 }
 
 /// Кадр 0 — основа (его размер и метаданные), кадры 1.. смешиваются в него по маскам `alphas` (по одной на кадр).
@@ -82,18 +166,39 @@ pub fn export(paths: &[PathBuf], alphas: &[Alpha], options: Options, out: &Path)
         let other = resize_to(processor::load_image(path, None)?, w, h)?;
         processor::blend_into(&mut base, &other, alpha);
     }
-    let jpeg = encode_jpeg(&base, options.quality)?;
-    drop(base);
     let markers = std::fs::read(first).map(|b| xmp::extract_jpeg_markers(&b)).unwrap_or_default();
-    let bytes = xmp::inject_markers(&jpeg, &xmp::scale_gpano(markers, (w0, h0), (w, h)));
-    // сначала во временный файл рядом, потом переименование: при сбое старый файл не испортится
-    let tmp = out.with_extension("jpg.part");
-    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, out).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        e.to_string()
-    })?;
-    Ok(Saved { width: w, height: h, bytes: bytes.len() as u64 })
+    let files = output_paths(out, options.format);
+    if options.format == Format::Equirect {
+        let jpeg = encode_jpeg(&base, options.quality)?;
+        drop(base);
+        let bytes = xmp::inject_markers(&jpeg, &xmp::scale_gpano(markers, (w0, h0), (w, h)));
+        write_file(out, &bytes)?;
+        return Ok(Saved { width: w, height: h, bytes: bytes.len() as u64, files });
+    }
+    // грани — уже не сферическая панорама: GPano им не нужен, EXIF и цветовой профиль остаются
+    let markers = xmp::without_xmp(markers);
+    let n = cubemap::face_size(w);
+    let mut total = 0u64;
+    let (fw, fh) = match options.format.cells() {
+        Some(cells) => {
+            let img = cubemap::render(&base, n, cells);
+            drop(base);
+            let bytes = xmp::inject_markers(&encode_jpeg(&img, options.quality)?, &markers);
+            write_file(out, &bytes)?;
+            total += bytes.len() as u64;
+            img.dimensions()
+        }
+        None => {
+            for (face, path) in Face::ALL.iter().zip(&files) {
+                let img = cubemap::render_face(&base, n, *face);
+                let bytes = xmp::inject_markers(&encode_jpeg(&img, options.quality)?, &markers);
+                write_file(path, &bytes)?;
+                total += bytes.len() as u64;
+            }
+            (n, n)
+        }
+    };
+    Ok(Saved { width: fw, height: fh, bytes: total, files })
 }
 
 /// Сколько пикселей результата сжимается для оценки веса: больше — точнее, но дольше.
@@ -105,12 +210,17 @@ const ESTIMATE_TILE: u32 = 128;
 /// сеткой по всей панораме, сложенные в одну картинку. Второе число — во сколько раз результат больше выборки.
 pub fn estimate_sample(img: &RgbImage) -> (RgbImage, f64) {
     let (w, h) = img.dimensions();
+    sample_tiles(w, h, |x, y, tw, th| image::imageops::crop_imm(img, x, y, tw, th).to_image())
+}
+
+/// То же для картинки `w`×`h`, которой ещё нет: `tile(x, y, ширина, высота)` даёт её кусок.
+fn sample_tiles(w: u32, h: u32, tile: impl Fn(u32, u32, u32, u32) -> RgbImage) -> (RgbImage, f64) {
     let total = w as u64 * h as u64;
     let t = ESTIMATE_TILE;
     if total <= ESTIMATE_PIXELS * 2 || w < t * 4 || h < t * 2 {
-        return (img.clone(), 1.0);
+        return (tile(0, 0, w, h), 1.0);
     }
-    // сетка с теми же пропорциями, что у панорамы
+    // сетка с теми же пропорциями, что у картинки
     let tiles = (ESTIMATE_PIXELS / (t as u64 * t as u64)).max(8) as f64;
     let cols = ((tiles * w as f64 / h as f64).sqrt().round() as u32).clamp(2, w / t);
     let rows = ((tiles / cols as f64).round() as u32).clamp(1, h / t);
@@ -122,26 +232,37 @@ pub fn estimate_sample(img: &RgbImage) -> (RgbImage, f64) {
                 ((((2 * c + 1) as u64 * w as u64 / (2 * cols as u64)) as u32).saturating_sub(t / 2) & !15).min(w - t);
             let y =
                 ((((2 * r + 1) as u64 * h as u64 / (2 * rows as u64)) as u32).saturating_sub(t / 2) & !15).min(h - t);
-            let tile = image::imageops::crop_imm(img, x, y, t, t).to_image();
-            image::imageops::replace(&mut sample, &tile, (c * t) as i64, (r * t) as i64);
+            image::imageops::replace(&mut sample, &tile(x, y, t, t), (c * t) as i64, (r * t) as i64);
         }
     }
     let scale = total as f64 / (sample.width() as u64 * sample.height() as u64) as f64;
     (sample, scale)
 }
 
-/// Примерный вес сохранённого файла при каждом качестве из `qualities`: первое фото в размере результата,
-/// сжатое так же, как при сохранении (по выборке), плюс метаданные. Люди на фото на вес почти не влияют.
-pub fn estimate_sizes(first: &Path, width: u32, qualities: &[u8]) -> Result<Vec<(u8, u64)>, String> {
+/// Примерный вес сохранённого (у граней — всех файлов вместе) при каждом качестве из `qualities`: первое фото
+/// в размере результата, сжатое так же, как при сохранении (по выборке), плюс метаданные. Люди на фото на вес
+/// почти не влияют. Грани для выборки — в той же раскладке (у отдельных файлов — полосой): пустые клетки креста
+/// тоже весят.
+pub fn estimate_sizes(first: &Path, width: u32, format: Format, qualities: &[u8]) -> Result<Vec<(u8, u64)>, String> {
     use rayon::prelude::*;
     let img = processor::load_image(first, None)?;
     let (w0, h0) = img.dimensions();
     let (w, h) = target_dims(w0, h0, width);
     let img = resize_to(img, w, h)?;
-    let (sample, scale) = estimate_sample(&img);
-    drop(img);
     let markers = std::fs::read(first).map(|b| xmp::extract_jpeg_markers(&b)).unwrap_or_default();
-    let meta: u64 = xmp::scale_gpano(markers, (w0, h0), (w, h)).iter().map(|m| m.len() as u64).sum();
+    let (sample, scale, markers, files) = if format == Format::Equirect {
+        let (sample, scale) = estimate_sample(&img);
+        (sample, scale, xmp::scale_gpano(markers, (w0, h0), (w, h)), 1)
+    } else {
+        let n = cubemap::face_size(w);
+        let cells = format.cells().unwrap_or(&cubemap::STRIP);
+        let (sw, sh) = cubemap::layout_dims(n, cells);
+        let (sample, scale) = sample_tiles(sw, sh, |x, y, tw, th| cubemap::render_region(&img, n, cells, x, y, tw, th));
+        let files = if format == Format::CubeFiles { Face::ALL.len() as u64 } else { 1 };
+        (sample, scale, xmp::without_xmp(markers), files)
+    };
+    drop(img);
+    let meta: u64 = markers.iter().map(|m| m.len() as u64).sum::<u64>() * files;
     qualities
         .par_iter()
         .map(|&q| encode_jpeg(&sample, q).map(|j| (q, (j.len() as f64 * scale).round() as u64 + meta)))
@@ -217,7 +338,9 @@ mod tests {
         let small = |p: &Path| processor::load_image(p, Some(400)).unwrap();
         let p = Params { dilate: 6, feather: 3, ..Default::default() };
         let preview = processor::compute_preview(&small(&a), &small(&b), p);
-        let saved = export(&[a, b], &[preview.alpha], Options { width: 0, quality: 95 }, &out).unwrap();
+        let saved =
+            export(&[a, b], &[preview.alpha], Options { width: 0, quality: 95, format: Format::Equirect }, &out)
+                .unwrap();
         assert_eq!((saved.width, saved.height), (w, h));
 
         let bytes = std::fs::read(&out).unwrap();
@@ -236,7 +359,9 @@ mod tests {
         let (w, h) = (1600u32, 800u32);
         let (a, out) = (dir.0.join("a.jpg"), dir.0.join("out.jpg"));
         std::fs::write(&a, xmp::inject_markers(&jpeg(&frame(w, h, 300)), &[gpano(w, h)])).unwrap();
-        let saved = export(std::slice::from_ref(&a), &[], Options { width: 800, quality: 80 }, &out).unwrap();
+        let saved =
+            export(std::slice::from_ref(&a), &[], Options { width: 800, quality: 80, format: Format::Equirect }, &out)
+                .unwrap();
         assert_eq!((saved.width, saved.height), (800, 400));
         let bytes = std::fs::read(&out).unwrap();
         assert_eq!(xmp::extract_jpeg_markers(&bytes), vec![gpano(800, 400)]);
@@ -270,12 +395,93 @@ mod tests {
         });
         let (a, out) = (dir.0.join("a.jpg"), dir.0.join("out.jpg"));
         std::fs::write(&a, jpeg(&img)).unwrap();
-        let est = estimate_sizes(&a, 4096, &[60, 85, 95]).unwrap();
+        let est = estimate_sizes(&a, 4096, Format::Equirect, &[60, 85, 95]).unwrap();
         for (q, bytes) in est {
-            let saved = export(std::slice::from_ref(&a), &[], Options { width: 4096, quality: q }, &out).unwrap();
+            let saved = export(
+                std::slice::from_ref(&a),
+                &[],
+                Options { width: 4096, quality: q, format: Format::Equirect },
+                &out,
+            )
+            .unwrap();
             let err = bytes as f64 / saved.bytes as f64 - 1.0;
             assert!(err.abs() < 0.1, "q{q}: estimate {bytes}, saved {}", saved.bytes);
         }
+    }
+
+    #[test]
+    fn cubemap_faces_and_layouts() {
+        let dir = temp_dir("cube");
+        let (w, h) = (1600u32, 800u32);
+        let a = dir.0.join("a.jpg");
+        let exif = {
+            let mut s = vec![0xFF, 0xE1, 0, 10];
+            s.extend(b"Exif\0\0MM");
+            s
+        };
+        std::fs::write(&a, xmp::inject_markers(&jpeg(&frame(w, h, 300)), &[exif.clone(), gpano(w, h)])).unwrap();
+        let options = |format| Options { width: 0, quality: 85, format };
+
+        let out = dir.0.join("pano.jpg");
+        let saved = export(std::slice::from_ref(&a), &[], options(Format::CubeFiles), &out).unwrap();
+        assert_eq!((saved.width, saved.height), (400, 400));
+        let names: Vec<String> = saved.files.iter().map(|p| p.file_name().unwrap().to_string_lossy().into()).collect();
+        assert_eq!(names, ["pano_f.jpg", "pano_r.jpg", "pano_b.jpg", "pano_l.jpg", "pano_u.jpg", "pano_d.jpg"]);
+        assert!(!out.exists());
+        let mut total = 0;
+        for f in &saved.files {
+            let bytes = std::fs::read(f).unwrap();
+            total += bytes.len() as u64;
+            // EXIF остаётся, GPano — нет: грань не панорама
+            assert_eq!(xmp::extract_jpeg_markers(&bytes), vec![exif.clone()]);
+            assert_eq!(image::load_from_memory(&bytes).unwrap().to_rgb8().dimensions(), (400, 400));
+        }
+        assert_eq!(total, saved.bytes);
+
+        let strip = dir.0.join("strip.jpg");
+        let saved = export(std::slice::from_ref(&a), &[], options(Format::CubeStrip), &strip).unwrap();
+        assert_eq!((saved.width, saved.height, saved.files.len()), (2400, 400, 1));
+        assert_eq!(image::open(&strip).unwrap().to_rgb8().dimensions(), (2400, 400));
+        let cross = dir.0.join("cross.jpg");
+        let saved = export(std::slice::from_ref(&a), &[], options(Format::CubeCross), &cross).unwrap();
+        assert_eq!((saved.width, saved.height), (1600, 1200));
+    }
+
+    #[test]
+    fn cubemap_estimate_close_to_saved_size() {
+        let dir = temp_dir("cube_estimate");
+        let (w, h) = (6000u32, 3000u32);
+        let img = RgbImage::from_fn(w, h, |x, y| {
+            let v = ((x * 7 + y * 13) ^ (x / 3 * y / 5)) as u8;
+            image::Rgb([v, v.wrapping_mul(3), (x / 20) as u8])
+        });
+        let (a, out) = (dir.0.join("a.jpg"), dir.0.join("out.jpg"));
+        std::fs::write(&a, jpeg(&img)).unwrap();
+        for format in [Format::CubeFiles, Format::CubeCross] {
+            let est = estimate_sizes(&a, 0, format, &[85]).unwrap()[0].1;
+            let saved = export(std::slice::from_ref(&a), &[], Options { width: 0, quality: 85, format }, &out).unwrap();
+            let err = est as f64 / saved.bytes as f64 - 1.0;
+            assert!(err.abs() < 0.1, "{format:?}: estimate {est}, saved {}", saved.bytes);
+        }
+    }
+
+    /// `CLEANER360_SAMPLE=photo.jpg cargo test -- --ignored cross_preview`: крест 4×3 из настоящей панорамы рядом с
+    /// ней, чтобы посмотреть швы глазами.
+    #[test]
+    #[ignore]
+    fn cross_preview() {
+        let Some(src) = std::env::var_os("CLEANER360_SAMPLE").map(PathBuf::from) else { return };
+        let out = std::env::temp_dir().join("cleaner360_cross.jpg");
+        export(&[src], &[], Options { width: 4096, quality: 85, format: Format::CubeCross }, &out).unwrap();
+        println!("{}", out.display());
+    }
+
+    #[test]
+    fn format_names_round_trip() {
+        for f in [Format::Equirect, Format::CubeFiles, Format::CubeStrip, Format::CubeCross] {
+            assert_eq!(Format::from(String::from(f)), f);
+        }
+        assert_eq!(Format::from("nonsense".to_string()), Format::Equirect);
     }
 
     #[test]
@@ -294,7 +500,7 @@ mod tests {
         let small: Vec<RgbImage> = paths.iter().map(|p| processor::load_image(p, Some(400)).unwrap()).collect();
         let s = processor::compute_stack_preview(&small, Params { dilate: 6, feather: 3, ..Default::default() });
         let out = dir.0.join("out.jpg");
-        export(&paths, &s.alphas, Options { width: 0, quality: 90 }, &out).unwrap();
+        export(&paths, &s.alphas, Options { width: 0, quality: 90, format: Format::Equirect }, &out).unwrap();
         let img = image::open(&out).unwrap().to_rgb8();
         for x in [100, 300, 500, 700] {
             assert_eq!(red_count(&img, x), 0, "passer-by left at x={x}");
@@ -313,12 +519,16 @@ mod perf {
     fn save_sizes() {
         let Some(src) = std::env::var_os("CLEANER360_SAMPLE").map(PathBuf::from) else { return };
         let out = std::env::temp_dir().join(format!("cleaner360_sizes_{}.jpg", std::process::id()));
-        for (width, quality) in [(0, 95), (0, 85), (8192, 85), (6144, 85), (5120, 80), (4096, 80)] {
+        let runs =
+            [(0, 95), (0, 85), (8192, 85), (6144, 85), (5120, 80), (4096, 80)].map(|(w, q)| (w, q, Format::Equirect));
+        let cube = [(0, 85, Format::CubeFiles), (8192, 85, Format::CubeFiles), (0, 85, Format::CubeCross)];
+        for (width, quality, format) in runs.into_iter().chain(cube) {
             let t = std::time::Instant::now();
-            let s = export(std::slice::from_ref(&src), &[], Options { width, quality }, &out).unwrap();
-            println!("{}×{} q{quality}: {:.2} MB, {:?}", s.width, s.height, s.bytes as f64 / 1_048_576.0, t.elapsed());
+            let s = export(std::slice::from_ref(&src), &[], Options { width, quality, format }, &out).unwrap();
+            let mb = s.bytes as f64 / 1_048_576.0;
+            println!("{format:?} {}×{} q{quality}: {mb:.2} MB, {:?}", s.width, s.height, t.elapsed());
             let t = std::time::Instant::now();
-            let est = estimate_sizes(&src, width, &[quality]).unwrap()[0].1;
+            let est = estimate_sizes(&src, width, format, &[quality]).unwrap()[0].1;
             println!(
                 "  estimate {:.2} MB ({:+.1}%), {:?}",
                 est as f64 / 1_048_576.0,
@@ -328,8 +538,11 @@ mod perf {
         }
         let t = std::time::Instant::now();
         let all: Vec<u8> = (crate::settings::MIN_QUALITY..=100).collect();
-        estimate_sizes(&src, 0, &all).unwrap();
+        estimate_sizes(&src, 0, Format::Equirect, &all).unwrap();
         println!("estimate for q{}–100 at full size: {:?}", all[0], t.elapsed());
+        for f in output_paths(&out, Format::CubeFiles) {
+            let _ = std::fs::remove_file(f);
+        }
         let _ = std::fs::remove_file(out);
     }
 }

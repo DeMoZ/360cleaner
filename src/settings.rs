@@ -19,6 +19,8 @@ pub struct Settings {
     pub export_width: u32,
     /// Качество JPEG при сохранении.
     pub export_quality: u8,
+    /// Панорама или кубическая карта.
+    pub export_format: crate::export::Format,
 }
 
 /// Ниже этого качества JPEG панорама заметно портится.
@@ -37,6 +39,7 @@ impl Default for Settings {
             feather: p.feather,
             export_width: 0,
             export_quality: 85,
+            export_format: Default::default(),
         }
     }
 }
@@ -80,6 +83,11 @@ mod tests {
         assert_eq!(s.skipped_version, "0.4.0");
         assert_eq!(s.dilate, Settings::default().dilate);
         assert_eq!(Settings::from_json("not json"), Settings::default());
+        // незнакомый формат — панорама, остальные настройки не теряются
+        let s2 = Settings::from_json(r#"{"exportFormat":"sphere","exportQuality":70}"#);
+        assert_eq!((s2.export_format, s2.export_quality), (crate::export::Format::Equirect, 70));
+        let s3 = Settings::from_json(r#"{"exportFormat":"cross"}"#);
+        assert_eq!(s3.export_format, crate::export::Format::CubeCross);
         let back = Settings::from_json(&serde_json::to_string(&s).unwrap());
         assert_eq!(back, s);
     }

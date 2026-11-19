@@ -9,6 +9,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod cubemap;
 mod donations;
 mod export;
 mod i18n;
@@ -135,6 +136,8 @@ struct Request {
     size: Option<u32>,
     #[serde(default)]
     quality: Option<u8>,
+    #[serde(default)]
+    format: Option<export::Format>,
     #[serde(default)]
     threshold: Option<f32>,
     #[serde(default)]
@@ -299,6 +302,7 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
                 "repo": update::REPO,
                 "threshold": p.threshold, "dilate": p.dilate, "feather": p.feather,
                 "exportWidth": st.settings.export_width, "exportQuality": st.settings.export_quality,
+                "exportFormat": st.settings.export_format,
                 "exportWidths": export::WIDTHS,
                 "colors": processor::SOURCE_COLORS,
                 "autoUpdate": st.settings.auto_update,
@@ -421,17 +425,20 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
 
 fn set_export_options(st: &mut State, req: &Request) {
     let s = &mut st.settings;
-    let (old_w, old_q) = (s.export_width, s.export_quality);
+    let old = (s.export_width, s.export_quality, s.export_format);
     if let Some(w) = req.size {
         s.export_width = if export::WIDTHS.contains(&w) { w } else { 0 };
     }
     if let Some(q) = req.quality {
         s.export_quality = q.clamp(settings::MIN_QUALITY, 100);
     }
-    if (s.export_width, s.export_quality) != (old_w, old_q) {
+    if let Some(f) = req.format {
+        s.export_format = f;
+    }
+    if (s.export_width, s.export_quality, s.export_format) != old {
         s.save();
     }
-    if s.export_width != old_w {
+    if (s.export_width, s.export_format) != (old.0, old.2) {
         let _ = st.estimate.send(());
     }
 }
@@ -626,21 +633,21 @@ fn compute_worker(rx: Receiver<()>, state: Shared, ui: Ui) {
 /// Зависит только от первого фото и размера результата; из накопившихся запросов нужен последний.
 fn estimate_worker(rx: Receiver<()>, state: Shared, ui: Ui) {
     let qualities: Vec<u8> = (settings::MIN_QUALITY..=100).collect();
-    let mut done: Option<(Option<u64>, u32)> = None;
+    let mut done: Option<(Option<u64>, u32, export::Format)> = None;
     while rx.recv().is_ok() {
         while rx.try_recv().is_ok() {}
-        let (first, width) = {
+        let (first, width, format) = {
             let st = lock(&state);
-            (st.photos.first().map(|p| (p.id, p.path.clone())), st.settings.export_width)
+            (st.photos.first().map(|p| (p.id, p.path.clone())), st.settings.export_width, st.settings.export_format)
         };
-        let key = (first.as_ref().map(|f| f.0), width);
+        let key = (first.as_ref().map(|f| f.0), width, format);
         if done == Some(key) {
             continue;
         }
         done = Some(key);
         let sizes = match &first {
             None => Value::Null,
-            Some((_, path)) => match export::estimate_sizes(path, width, &qualities) {
+            Some((_, path)) => match export::estimate_sizes(path, width, format, &qualities) {
                 Ok(list) => list.into_iter().map(|(q, bytes)| (q.to_string(), json!(bytes))).collect(),
                 Err(e) => {
                     eprintln!("size estimate: {e}");
@@ -648,7 +655,7 @@ fn estimate_worker(rx: Receiver<()>, state: Shared, ui: Ui) {
                 }
             },
         };
-        ui.send(json!({"type": "size_estimate", "id": key.0, "width": width, "sizes": sizes}));
+        ui.send(json!({"type": "size_estimate", "id": key.0, "width": width, "format": format, "sizes": sizes}));
     }
 }
 
@@ -666,7 +673,8 @@ fn save(state: &Shared, ui: &Ui) {
         return;
     };
     let (paths, alphas, lang) = (computed.paths.clone(), computed.alphas.clone(), st.lang);
-    let options = export::Options { width: st.settings.export_width, quality: st.settings.export_quality };
+    let s = &st.settings;
+    let options = export::Options { width: s.export_width, quality: s.export_quality, format: s.export_format };
     let dims = st.photos[0].dims;
     drop(st);
 
@@ -677,8 +685,9 @@ fn save(state: &Shared, ui: &Ui) {
         (true, true) => format!("_clean_{}", options.width),
         (true, false) => "_clean".to_string(),
         (false, true) => format!("_{}", options.width),
-        (false, false) => format!("_q{}", options.quality),
-    };
+        (false, false) if options.format == export::Format::Equirect => format!("_q{}", options.quality),
+        (false, false) => String::new(),
+    } + options.format.tag();
     let mut dialog = rfd::FileDialog::new()
         .set_title(i18n::tr(lang, i18n::Text::SaveTitle))
         .set_file_name(format!("{stem}{suffix}.jpg"))
@@ -690,7 +699,7 @@ fn save(state: &Shared, ui: &Ui) {
     if !out.extension().is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")) {
         out.set_extension("jpg");
     }
-    if paths.contains(&out) {
+    if export::output_paths(&out, options.format).iter().any(|p| paths.contains(p)) {
         ui.error("errOverwrite", json!({}));
         return;
     }
@@ -704,10 +713,18 @@ fn save(state: &Shared, ui: &Ui) {
         st.exporting = false;
         match result {
             Ok(saved) => {
-                st.last_saved = Some(out.clone());
+                let shown = saved.files.first().cloned().unwrap_or_else(|| out.clone());
+                st.last_saved = Some(shown.clone());
                 drop(st);
+                // шесть граней: «имя_*.jpg»
+                let name = if saved.files.len() > 1 {
+                    format!("{}_*.jpg", out.file_stem().unwrap_or_default().to_string_lossy())
+                } else {
+                    file_name(&shown)
+                };
                 ui.send(json!({
-                    "type": "save_success", "path": out.to_string_lossy(), "name": file_name(&out),
+                    "type": "save_success", "path": shown.to_string_lossy(), "name": name,
+                    "files": saved.files.len(),
                     "w": saved.width, "h": saved.height, "mb": format!("{:.1}", saved.bytes as f64 / 1_048_576.0),
                 }));
             }
