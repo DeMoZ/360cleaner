@@ -1154,7 +1154,8 @@ window.onRustMessage = function (msg) {
       renderAngles();
       if (msg.count === 1) setStatus('stOne', { name: photos[0] ? photos[0].name : '' }, 'ready');
       else if (msg.changed === 0) setStatus('stNoDiff', {}, 'ready');
-      else if (msg.changed > 0.35) setStatus('stTooMuch', {}, 'busy');
+      else if (msg.count === 2 ? msg.too_many : msg.changed > 0.35) setStatus('stTooMuch', {}, 'busy');
+      else if (msg.count === 2 && msg.threshold_raised) setStatus('stThresholdRaised', { t: Math.round(msg.threshold_raised) }, 'ready');
       else if (msg.count === 2) setStatus('stDone', {}, 'ready');
       else setStatus('stStackDone', { n: msg.count }, 'ready');
       renderPhotos();
