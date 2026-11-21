@@ -1,5 +1,5 @@
 //! Сеть через системный `curl` (есть в macOS и в Windows 10+): без своей реализации TLS в программе.
-//! Нужна только для донатов и обновлений; обработка фото работает без сети.
+//! Нужна только для донатов, обновлений и модели ИИ-дорисовки; обработка фото работает без сети.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -47,6 +47,35 @@ pub fn download(url: &str, to: &Path) -> Result<(), String> {
         .output()
         .map_err(|e| format!("could not run curl: {e}"))?;
     if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
+}
+
+/// Скачивает большой файл на диск без ограничения по времени (обрывается, если минуту качает медленнее 1 КБ/с).
+/// `progress` получает, сколько байт уже на диске.
+pub fn download_with_progress(url: &str, to: &Path, progress: &dyn Fn(u64)) -> Result<(), String> {
+    let mut child = curl()
+        .args(["--speed-limit", "1024", "--speed-time", "60", "-o"])
+        .arg(to)
+        .arg(url)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("could not run curl: {e}"))?;
+    loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            if status.success() {
+                return Ok(());
+            }
+            let mut err = String::new();
+            if let Some(mut pipe) = child.stderr.take() {
+                let _ = std::io::Read::read_to_string(&mut pipe, &mut err);
+            }
+            let _ = std::fs::remove_file(to);
+            let err = err.trim();
+            return Err(if err.is_empty() { format!("curl exited with code {:?}", status.code()) } else { err.into() });
+        }
+        progress(std::fs::metadata(to).map(|m| m.len()).unwrap_or(0));
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
 }
 
 /// Открывает страницу в браузере. Только https://.

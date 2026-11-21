@@ -9,7 +9,7 @@
 [![Release](https://img.shields.io/github/v/release/DeMoZ/360cleaner?label=release&color=3b82f6)](https://github.com/DeMoZ/360cleaner/releases/latest)
 ![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-111827?logo=apple)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-111827?logo=windows)
-![No AI](https://img.shields.io/badge/No%20AI-classic%20computer%20vision-10b981)
+![No AI by default](https://img.shields.io/badge/No%20AI-by%20default-10b981)
 [![License: MIT](https://img.shields.io/badge/license-MIT-8b5cf6)](LICENSE)
 
 [English](README.md) · [Русский](README.ru.md) · **ภาษาไทย**
@@ -32,7 +32,8 @@
 | **2** | ช่างภาพ | ในสองภาพคุณยืนคนละฝั่ง แต่ละจุดจะนำมาจากภาพที่ไม่มีคุณอยู่ |
 | **3+** | คนเดินผ่าน | สำหรับที่ที่มีคนเยอะ: แต่ละบริเวณจะนำมาจากภาพที่ตรงนั้นไม่มีใคร |
 
-- **ไม่ใช้ AI ไม่มีการวาดเติม** ใช้เฉพาะพิกเซลจริงจากภาพของคุณ คมชัดเท่าต้นฉบับ
+- **ไม่ใช้ AI ไม่มีการวาดเติม (ค่าเริ่มต้น)** ใช้เฉพาะพิกเซลจริงจากภาพของคุณ คมชัดเท่าต้นฉบับ โหมด
+  [AI fill](#-ai-fill-ไม่บังคับ) แยกต่างหากและปิดอยู่จนกว่าคุณจะเปิดเอง
 - **ยังเป็นภาพ 360°** ข้อมูล XMP GPano, EXIF และโปรไฟล์สี ICC ถูกคัดลอกไปด้วย Google Photos, Facebook, แว่น VR
   และ Insta360 Studio จึงเปิดผลลัพธ์เป็นทรงกลมได้
 - **บันทึกได้ตรงกับที่เห็น** ไฟล์ที่บันทึกตรงกับภาพตัวอย่างทุกประการ
@@ -43,7 +44,7 @@
 ดาวน์โหลดเวอร์ชันล่าสุดจากหน้า [**Releases**](https://github.com/DeMoZ/360cleaner/releases/latest)
 
 <details open>
-<summary><b>macOS</b> (Apple Silicon)</summary>
+<summary><b>macOS</b> 13.4 ขึ้นไป (Apple Silicon)</summary>
 
 1. เปิด `360Cleaner-macOS-v….dmg` แล้วลากแอปไปที่ **Applications**
 2. แอปไม่ได้ลงนามด้วยใบรับรองของ Apple macOS จึงบล็อกการเปิดครั้งแรก: กด **Done** เปิด
@@ -108,6 +109,22 @@
 ด้านหน้าคือกึ่งกลางของพาโนรามา ขอบบนของหน้าด้านบนและขอบล่างของหน้าด้านล่างหันไปทางด้านหลัง EXIF และโปรไฟล์สี ICC
 ยังอยู่ แต่ไม่เขียน GPano เพราะแต่ละหน้าไม่ใช่ทรงกลมแล้ว
 
+## 🪄 AI fill (ไม่บังคับ)
+
+โหมดแยกสำหรับสิ่งที่แก้ด้วยภาพหลายภาพไม่ได้: มีภาพเดียว มีคนยืนที่เดิมในทุกภาพ หรือเห็นขาตั้งกล้อง ระบายทับสิ่งนั้น
+แล้วโมเดล [LaMa](https://github.com/advimman/lama) จะวาดสิ่งที่น่าจะอยู่ด้านหลัง
+
+1. เปิด **Fill in with AI** ในส่วน **AI fill** ครั้งแรกจะดาวน์โหลดโมเดล (208 MB จาก
+   [Carve/LaMa-ONNX](https://huggingface.co/Carve/LaMa-ONNX), Apache-2.0) และตรวจสอบด้วย SHA-256
+2. เลือก **Brush** (<kbd>B</kbd>) แล้วระบายบนผลลัพธ์ในมุมมองแบบแบน <kbd>Alt</kbd>/<kbd>Option</kbd> ลบ,
+   <kbd>Shift</kbd> + ลาก เลื่อนภาพ, <kbd>⌘/Ctrl</kbd>+<kbd>Z</kbd> ยกเลิกเส้นล่าสุด
+3. กด **Fill in** แต่ละบริเวณที่ระบายจะถูกวาดในมุมมองแบบเพอร์สเปกทีฟของตัวเอง ความบิดเบี้ยวของพาโนรามาใกล้ขั้วจึงไม่เป็น
+   ปัญหา ครั้งแรกจะโหลดโมเดลด้วย (ประมาณ 5 วินาที) หลังจากนั้นบริเวณละ 2–3 วินาที
+
+ทุกอย่างทำงานบนคอมพิวเตอร์ของคุณ ภาพไม่ถูกส่งไปไหน สิ่งที่โมเดลวาดเป็นของที่สร้างขึ้น ไม่ใช่ภาพถ่ายจริง: บริเวณที่วาดเติม
+จะมีเครื่องหมายในหน้าต่าง และชื่อไฟล์ที่บันทึกจะมี `_ai` โมเดลทำงานที่ 512×512 บริเวณใหญ่ (คนที่อยู่ชิดกล้อง)
+จึงคมน้อยกว่าส่วนอื่นของพาโนรามา 8K บริเวณที่กว้างเกินประมาณ 120° จะไม่รับ: ให้ระบายเป็นส่วน ๆ
+
 ## 🎛 การตั้งค่า
 
 | การตั้งค่า | ทำอะไร |
@@ -125,7 +142,7 @@
 หน้าจอโปรแกรมยังไม่มีภาษาไทย ชื่อการตั้งค่าในตารางจึงเป็นภาษาอังกฤษตามที่เห็นในแอป
 
 **ปุ่มลัด:** <kbd>1</kbd> ผลลัพธ์ · <kbd>2</kbd> แผนที่ความต่าง · <kbd>3</kbd>–<kbd>9</kbd> ภาพ · <kbd>S</kbd>
-สลับโซน · <kbd>Space</kbd> 360° · <kbd>⌘/Ctrl</kbd>+<kbd>O</kbd> เพิ่มภาพ · <kbd>⌘/Ctrl</kbd>+<kbd>S</kbd> บันทึก
+สลับโซน · <kbd>B</kbd> แปรง AI · <kbd>Space</kbd> 360° · <kbd>⌘/Ctrl</kbd>+<kbd>O</kbd> เพิ่มภาพ · <kbd>⌘/Ctrl</kbd>+<kbd>S</kbd> บันทึก
 
 ## 🛠 คอมไพล์จากซอร์สโค้ด
 
@@ -145,4 +162,5 @@ scripts/build-macos.sh                      # dist/360Cleaner.app, .dmg แล�
 
 ## 📄 สัญญาอนุญาต
 
-[MIT](LICENSE)
+[MIT](LICENSE) รวมอยู่ในโปรแกรม: [ONNX Runtime](https://onnxruntime.ai) (MIT) ผ่าน [ort](https://github.com/pykeio/ort)
+(MIT / Apache-2.0) ดาวน์โหลดเมื่อเปิด AI fill ครั้งแรก: โมเดล LaMa (Apache-2.0)

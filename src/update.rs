@@ -113,7 +113,7 @@ pub fn can_write(target: &Path) -> bool {
     ok
 }
 
-fn sha256_file(path: &Path) -> std::io::Result<String> {
+pub fn sha256_file(path: &Path) -> std::io::Result<String> {
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
     std::io::copy(&mut file, &mut hasher)?;

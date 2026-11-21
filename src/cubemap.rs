@@ -82,7 +82,7 @@ fn cubic_weights(t: f32) -> [f32; 4] {
 }
 
 /// Цвет панорамы в направлении `d`: бикубическая выборка, по горизонтали панорама замкнута.
-fn sample(eq: &RgbImage, d: [f32; 3]) -> [u8; 3] {
+pub fn sample(eq: &RgbImage, d: [f32; 3]) -> [u8; 3] {
     let (w, h) = eq.dimensions();
     let [x, y, z] = d;
     let lon = x.atan2(z);
