@@ -1247,6 +1247,13 @@ window.onRustMessage = function (msg) {
       updateButtons();
       break;
 
+    // формат сохранения поставлен как у первого фото
+    case 'export_format':
+      exportFormat = msg.format;
+      $('exportFormat').value = exportFormat;
+      renderSizes();
+      break;
+
     case 'size_estimate':
       sizeEstimate = msg;
       renderSizeEstimate();
@@ -1360,7 +1367,7 @@ function renderPhotos() {
   photos.forEach((p, i) => {
     const chip = document.createElement('div');
     chip.className = 'chip' + (p.loading ? ' loading' : '') + (currentTab === 'photo:' + p.id ? ' active' : '');
-    chip.title = p.name;
+    chip.title = p.cube ? `${p.name} → ${p.size || ''}` : p.name;
     chip.onclick = () => showPhoto(p.id);
     // цвет кадра — как на карте различий (только для трёх кадров и больше)
     if (n > 2 && colors.length) {
@@ -1377,7 +1384,7 @@ function renderPhotos() {
     const info = document.createElement('div');
     info.className = 'chip-info';
     info.innerHTML = `<div class="chip-name">${esc(p.loading ? t('opening', { name: shortName(p.name) }) : shortName(p.name))}</div>`
-      + `<div class="chip-size">${esc(p.size || '')}</div>`;
+      + `<div class="chip-size">${esc(chipSize(p))}</div>`;
     const x = document.createElement('button');
     x.className = 'chip-x';
     x.textContent = '✕';
@@ -1388,6 +1395,12 @@ function renderPhotos() {
   });
   $('modeText').textContent = n === 0 ? t('modeNone') : n === 1 ? t('modeSingle') : n === 2 ? t('modePair') : t('modeStack', { n });
   renderSizes();
+}
+
+/** Размер под именем фото; у кубической карты — её вид и размер файла (панорама из неё — в подсказке). */
+function chipSize(p) {
+  if (!p.cube) return p.size || '';
+  return `${t('cubeSource', { layout: p.cube.layout })} · ${p.cube.size}`;
 }
 
 /** Подпись размера: у панорамы — её размер, у кубической карты — грани (сторона — четверть ширины) или файла. */

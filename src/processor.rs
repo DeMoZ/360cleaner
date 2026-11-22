@@ -67,13 +67,10 @@ pub fn circular_distance(a: f32, b: f32) -> f32 {
     if diff > PI { 2.0 * PI - diff } else { diff }
 }
 
-/// Открывает файл; с `max_dim` уменьшает так, чтобы большая сторона была не больше `max_dim`.
+/// Открывает снимок как панораму (кубическая карта переводится, `source::load`); с `max_dim` уменьшает так,
+/// чтобы большая сторона была не больше `max_dim`.
 pub fn load_image(path: &Path, max_dim: Option<u32>) -> Result<RgbImage, String> {
-    let img = image::open(path).map_err(|e| e.to_string())?.to_rgb8();
-    Ok(match max_dim {
-        Some(dim) => downscale(img, dim),
-        None => img,
-    })
+    crate::source::load(path, max_dim).map(|l| l.image)
 }
 
 pub fn downscale(img: RgbImage, dim: u32) -> RgbImage {

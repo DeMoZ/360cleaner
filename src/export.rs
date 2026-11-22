@@ -1,10 +1,12 @@
 //! Сохранение панорамы в полном размере или уменьшенной: смешивание кадров по маскам превью, уменьшение,
 //! JPEG с выбранным качеством, перенос метаданных 360° (размеры GPano пересчитываются). Вместо панорамы можно
-//! сохранить кубическую карту: шесть файлов граней, полосу 6×1 или крест 4×3 (`cubemap`).
+//! сохранить кубическую карту: шесть файлов граней, полосу 6×1 или крест 4×3 (`cubemap`). Исходные фото тоже
+//! могут быть кубической картой (`source`): открываются панорамой, а у сохранённой панорамы появляется GPano.
 
 use crate::cubemap::{self, Cell, Face};
 use crate::inpaint;
 use crate::processor::{self, Alpha};
+use crate::source::{self, Layout};
 use crate::xmp;
 use fast_image_resize::images::Image;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
@@ -37,6 +39,16 @@ impl Format {
             Format::CubeFiles => "cube",
             Format::CubeStrip => "strip",
             Format::CubeCross => "cross",
+        }
+    }
+
+    /// Формат, в каком было открытое фото.
+    pub fn of(layout: Layout) -> Self {
+        match layout {
+            Layout::Equirect => Format::Equirect,
+            Layout::Strip => Format::CubeStrip,
+            Layout::Cross => Format::CubeCross,
+            Layout::Faces => Format::CubeFiles,
         }
     }
 
@@ -153,10 +165,12 @@ pub struct Saved {
 
 /// Кадр 0 — основа (его размер и метаданные), кадры 1.. смешиваются в него по маскам `alphas` (по одной на кадр).
 /// В памяти одновременно только два кадра.
-/// Результат шириной `width` (0 — исходная): кадры по маскам `alphas`. Второе — исходный размер первого кадра.
-pub fn compose(paths: &[PathBuf], alphas: &[Alpha], width: u32) -> Result<(RgbImage, (u32, u32)), String> {
+/// Результат шириной `width` (0 — исходная): кадры по маскам `alphas`. Второе — исходный размер первого кадра
+/// (панорамы, в которую он открылся), третье — в каком виде он был.
+pub fn compose(paths: &[PathBuf], alphas: &[Alpha], width: u32) -> Result<(RgbImage, (u32, u32), Layout), String> {
     let first = paths.first().ok_or("no photos")?;
-    let base = processor::load_image(first, None)?;
+    let loaded = source::load(first, None)?;
+    let (base, layout) = (loaded.image, loaded.layout);
     let (w0, h0) = base.dimensions();
     let (w, h) = target_dims(w0, h0, width);
     let mut base = resize_to(base, w, h)?;
@@ -168,7 +182,7 @@ pub fn compose(paths: &[PathBuf], alphas: &[Alpha], width: u32) -> Result<(RgbIm
         let other = resize_to(processor::load_image(path, None)?, w, h)?;
         processor::blend_into(&mut base, &other, alpha);
     }
-    Ok((base, (w0, h0)))
+    Ok((base, (w0, h0), layout))
 }
 
 /// `patches` — куски ИИ-дорисовки (пусто, если её нет): ложатся поверх склеенных кадров.
@@ -180,7 +194,7 @@ pub fn export(
     out: &Path,
 ) -> Result<Saved, String> {
     let first = paths.first().ok_or("no photos")?;
-    let (mut base, (w0, h0)) = compose(paths, alphas, options.width)?;
+    let (mut base, (w0, h0), layout) = compose(paths, alphas, options.width)?;
     let (w, h) = base.dimensions();
     for patch in patches {
         patch.apply(&mut base);
@@ -190,7 +204,7 @@ pub fn export(
     if options.format == Format::Equirect {
         let jpeg = encode_jpeg(&base, options.quality)?;
         drop(base);
-        let bytes = xmp::inject_markers(&jpeg, &xmp::scale_gpano(markers, (w0, h0), (w, h)));
+        let bytes = xmp::inject_markers(&jpeg, &panorama_markers(markers, layout, (w0, h0), (w, h)));
         write_file(out, &bytes)?;
         return Ok(Saved { width: w, height: h, bytes: bytes.len() as u64, files });
     }
@@ -218,6 +232,17 @@ pub fn export(
         }
     };
     Ok(Saved { width: fw, height: fh, bytes: total, files })
+}
+
+/// Метаданные панорамы `to` из метаданных первого фото размером `from`: GPano пересчитан, а у кубической карты
+/// его не было — пишется новый.
+fn panorama_markers(markers: Vec<Vec<u8>>, layout: Layout, from: (u32, u32), to: (u32, u32)) -> Vec<Vec<u8>> {
+    if !layout.is_cube() {
+        return xmp::scale_gpano(markers, from, to);
+    }
+    let mut markers = xmp::without_xmp(markers);
+    markers.push(xmp::gpano(to.0, to.1));
+    markers
 }
 
 /// Сколько пикселей результата сжимается для оценки веса: больше — точнее, но дольше.
@@ -264,14 +289,15 @@ fn sample_tiles(w: u32, h: u32, tile: impl Fn(u32, u32, u32, u32) -> RgbImage) -
 /// тоже весят.
 pub fn estimate_sizes(first: &Path, width: u32, format: Format, qualities: &[u8]) -> Result<Vec<(u8, u64)>, String> {
     use rayon::prelude::*;
-    let img = processor::load_image(first, None)?;
+    let loaded = source::load(first, None)?;
+    let (img, layout) = (loaded.image, loaded.layout);
     let (w0, h0) = img.dimensions();
     let (w, h) = target_dims(w0, h0, width);
     let img = resize_to(img, w, h)?;
     let markers = std::fs::read(first).map(|b| xmp::extract_jpeg_markers(&b)).unwrap_or_default();
     let (sample, scale, markers, files) = if format == Format::Equirect {
         let (sample, scale) = estimate_sample(&img);
-        (sample, scale, xmp::scale_gpano(markers, (w0, h0), (w, h)), 1)
+        (sample, scale, panorama_markers(markers, layout, (w0, h0), (w, h)), 1)
     } else {
         let n = cubemap::face_size(w);
         let cells = format.cells().unwrap_or(&cubemap::STRIP);
@@ -470,6 +496,29 @@ mod tests {
         let cross = dir.0.join("cross.jpg");
         let saved = export(std::slice::from_ref(&a), &[], &[], options(Format::CubeCross), &cross).unwrap();
         assert_eq!((saved.width, saved.height), (1600, 1200));
+    }
+
+    #[test]
+    fn cubemap_photo_saved_as_panorama() {
+        let dir = temp_dir("cube_in");
+        let a = dir.0.join("a.jpg");
+        std::fs::write(&a, jpeg(&frame(1600, 800, 300))).unwrap();
+        let strip = dir.0.join("a_strip.jpg");
+        let options = |format| Options { width: 0, quality: 90, format };
+        export(std::slice::from_ref(&a), &[], &[], options(Format::CubeStrip), &strip).unwrap();
+        // полоса обратно в панораму: тот же размер, и у файла теперь есть GPano
+        let out = dir.0.join("back.jpg");
+        let saved = export(std::slice::from_ref(&strip), &[], &[], options(Format::Equirect), &out).unwrap();
+        assert_eq!((saved.width, saved.height), (1600, 800));
+        let bytes = std::fs::read(&out).unwrap();
+        let markers = xmp::extract_jpeg_markers(&bytes);
+        assert!(markers.iter().any(|m| String::from_utf8_lossy(m).contains("GPano:FullPanoWidthPixels=\"1600\"")));
+        let back = image::load_from_memory(&bytes).unwrap().to_rgb8();
+        assert!(red_count(&back, 300) > 100);
+        // и снова в полосу: того же размера, что была
+        let again = dir.0.join("again.jpg");
+        let saved = export(std::slice::from_ref(&strip), &[], &[], options(Format::CubeStrip), &again).unwrap();
+        assert_eq!((saved.width, saved.height), (2400, 400));
     }
 
     #[test]

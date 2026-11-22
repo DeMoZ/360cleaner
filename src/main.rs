@@ -18,6 +18,7 @@ mod inpaint;
 mod net;
 mod processor;
 mod settings;
+mod source;
 mod update;
 mod xmp;
 
@@ -80,9 +81,12 @@ impl Ui {
 
 struct Photo {
     id: u64,
+    /// У шести файлов граней — передней (`source::canonical`).
     path: PathBuf,
-    /// Размер файла в пикселях.
+    /// Размер панорамы в пикселях (у кубической карты — той, в которую она открылась).
     dims: Option<(u32, u32)>,
+    /// В каком виде фото и размер файла (у граней — одной грани); None — ещё открывается.
+    source: Option<(source::Layout, (u32, u32))>,
     /// None — ещё открывается.
     preview: Option<RgbImage>,
 }
@@ -133,6 +137,8 @@ struct State {
     /// Растёт при каждой смене фото или параметров.
     generation: u64,
     computed: Option<Computed>,
+    /// Первое фото, по которому уже выбран формат сохранения (`follow_first_format`).
+    format_for: Option<u64>,
     exporting: bool,
     last_saved: Option<PathBuf>,
     settings: Settings,
@@ -225,6 +231,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         params,
         generation: 0,
         computed: None,
+        format_for: None,
         exporting: false,
         last_saved: None,
         lang: i18n::resolve(&settings.language),
@@ -502,8 +509,11 @@ fn photos_msg(st: &State) -> Value {
         .map(|p| {
             json!({
                 "id": p.id,
-                "name": file_name(&p.path),
+                "name": source::display_name(&p.path),
                 "size": p.dims.map(|(w, h)| format!("{w}×{h}")),
+                "cube": p.source.filter(|s| s.0.is_cube()).map(|(layout, (w, h))| {
+                    json!({"layout": layout.label(), "size": format!("{w}×{h}")})
+                }),
                 "width": p.dims.map(|d| d.0),
                 "loading": p.preview.is_none(),
             })
@@ -512,8 +522,25 @@ fn photos_msg(st: &State) -> Value {
     json!({"type": "photos", "list": list})
 }
 
+/// Формат сохранения — как у первого фото (полоса, крест, грани или панорама), один раз на каждое новое первое
+/// фото: потом его можно поменять в окне. Окно узнаёт до списка фото — подписи размеров зависят от формата.
+fn follow_first_format(st: &mut State, ui: &Ui) {
+    let Some((id, (layout, _))) = st.photos.first().and_then(|p| Some((p.id, p.source?))) else { return };
+    if st.format_for == Some(id) {
+        return;
+    }
+    st.format_for = Some(id);
+    let format = export::Format::of(layout);
+    if st.settings.export_format != format {
+        st.settings.export_format = format;
+        st.settings.save();
+        ui.send(json!({"type": "export_format", "format": format}));
+    }
+}
+
 /// После любой смены списка: старый расчёт больше не годится.
 fn photos_changed(st: &mut State, ui: &Ui) {
+    follow_first_format(st, ui);
     st.generation += 1;
     st.computed = None;
     ui.send(photos_msg(st));
@@ -529,7 +556,8 @@ fn add_files(paths: Vec<PathBuf>, state: &Shared, ui: &Ui, loader: &SyncSender<(
     }
     let mut st = lock(state);
     let mut added = Vec::new();
-    for path in images {
+    // шесть граней одного снимка — одно фото
+    for path in images.iter().map(|p| source::canonical(p)) {
         if st.photos.iter().any(|p| p.path == path) {
             continue;
         }
@@ -539,7 +567,7 @@ fn add_files(paths: Vec<PathBuf>, state: &Shared, ui: &Ui, loader: &SyncSender<(
         }
         let id = st.next_id;
         st.next_id += 1;
-        st.photos.push(Photo { id, path: path.clone(), dims: None, preview: None });
+        st.photos.push(Photo { id, path: path.clone(), dims: None, source: None, preview: None });
         added.push((id, path));
     }
     if added.is_empty() {
@@ -575,19 +603,21 @@ fn load_photo(id: u64, path: PathBuf, state: &Shared, ui: &Ui, compute: &Sender<
     if !lock(state).photos.iter().any(|p| p.id == id) {
         return; // убрали из списка, пока ждало очереди
     }
-    let name = file_name(&path);
+    let name = source::display_name(&path);
     ui.status("stLoading", json!({"name": name}), true);
-    let dims = image::image_dimensions(&path).ok();
-    match processor::load_image(&path, Some(processor::PREVIEW_DIM)) {
-        Ok(preview) => {
+    match source::load(&path, Some(processor::PREVIEW_DIM)) {
+        Ok(loaded) => {
+            let (preview, dims) = (loaded.image, Some(loaded.dims));
             let image_b64 = jpeg_b64(&preview, 85);
             let mut st = lock(state);
             let first = st.photos.first().and_then(|p| p.dims);
             let Some(photo) = st.photos.iter_mut().find(|p| p.id == id) else { return };
             photo.preview = Some(preview);
             photo.dims = dims;
+            photo.source = Some((loaded.layout, loaded.file_dims));
             let mut warning = None;
             if let Some((w, h)) = dims
+                && !loaded.layout.is_cube()
                 && (w as f32 / h as f32 - 2.0).abs() > 0.05
             {
                 warning = Some(("warnNot360", json!({"name": name, "w": w, "h": h})));
@@ -736,7 +766,7 @@ fn save(state: &Shared, ui: &Ui) {
 
     let first = &paths[0];
     let resized = dims.is_some_and(|(w, h)| export::target_dims(w, h, options.width) != (w, h));
-    let stem = first.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+    let stem = source::stem(first);
     let suffix = match (paths.len() > 1, resized) {
         (true, true) => format!("_clean_{}", options.width),
         (true, false) => "_clean".to_string(),
@@ -756,7 +786,9 @@ fn save(state: &Shared, ui: &Ui) {
     if !out.extension().is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")) {
         out.set_extension("jpg");
     }
-    if export::output_paths(&out, options.format).iter().any(|p| paths.contains(p)) {
+    // исходные файлы не перезаписываются, у граней — ни один из шести
+    let sources: Vec<PathBuf> = paths.iter().flat_map(|p| source::files(p)).collect();
+    if export::output_paths(&out, options.format).iter().any(|p| sources.contains(p)) {
         ui.error("errOverwrite", json!({}));
         return;
     }
@@ -983,7 +1015,7 @@ fn ai_fill(state: &Shared, ui: &Ui, dabs: Vec<inpaint::Dab>) {
                 return Err("empty".into());
             }
             ui.processing("procAiCompose");
-            let (mut big, _) = export::compose(&paths, &alphas, AI_WIDTH)?;
+            let (mut big, ..) = export::compose(&paths, &alphas, AI_WIDTH)?;
             let mut model = model.lock().unwrap_or_else(|e| e.into_inner());
             if model.is_none() {
                 ui.processing("procAiLoad");
