@@ -111,6 +111,26 @@ pub fn without_xmp(markers: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
         .collect()
 }
 
+/// Сегмент XMP с GPano для панорамы `w`×`h` без обрезки: панораме из кубической карты своего GPano неоткуда
+/// взять, а без него просмотрщики 360° не узнают в файле сферу.
+pub fn gpano(w: u32, h: u32) -> Vec<u8> {
+    let xml = format!(
+        "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\
+         <x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\
+         <rdf:Description rdf:about=\"\" xmlns:GPano=\"http://ns.google.com/photos/1.0/panorama/\" \
+         GPano:ProjectionType=\"equirectangular\" GPano:UsePanoramaViewer=\"True\" \
+         GPano:FullPanoWidthPixels=\"{w}\" GPano:FullPanoHeightPixels=\"{h}\" \
+         GPano:CroppedAreaImageWidthPixels=\"{w}\" GPano:CroppedAreaImageHeightPixels=\"{h}\" \
+         GPano:CroppedAreaLeftPixels=\"0\" GPano:CroppedAreaTopPixels=\"0\"/>\
+         </rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>"
+    );
+    let len = 2 + XMP_NS.len() + xml.len();
+    let mut seg = vec![0xFF, 0xE1, (len >> 8) as u8, len as u8];
+    seg.extend_from_slice(XMP_NS);
+    seg.extend_from_slice(xml.as_bytes());
+    seg
+}
+
 const XMP_EXT_NS: &[u8] = b"http://ns.adobe.com/xmp/extension/\0";
 
 /// Заменяет число после `key` в обеих записях XMP: атрибутом `key="123"` и элементом `<key>123</key>`.
@@ -200,6 +220,18 @@ mod tests {
         let xmp = seg(0xE1, b"http://ns.adobe.com/xap/1.0/\0<GPano/>");
         let ext = seg(0xE1, b"http://ns.adobe.com/xmp/extension/\0ABCD");
         assert_eq!(without_xmp(vec![exif.clone(), xmp, icc.clone(), ext]), vec![exif, icc]);
+    }
+
+    #[test]
+    fn new_gpano_scales_like_camera_one() {
+        let seg = gpano(4000, 2000);
+        assert_eq!(((seg[2] as usize) << 8 | seg[3] as usize) + 2, seg.len());
+        let scaled = scale_gpano(vec![seg], (4000, 2000), (2000, 1000));
+        let text = String::from_utf8_lossy(&scaled[0]);
+        assert!(
+            text.contains("GPano:FullPanoWidthPixels=\"2000\"") && text.contains("ProjectionType=\"equirectangular\"")
+        );
+        assert!(without_xmp(scaled).is_empty());
     }
 
     #[test]

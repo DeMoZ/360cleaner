@@ -113,6 +113,11 @@ Instead of the 2:1 panorama you can save a **cubemap**: six square 90° views fo
 Front is the middle of the panorama. The top of the up face and the bottom of the down face point backwards. EXIF
 and the ICC profile are kept; GPano isn't written, since a face is no longer a sphere.
 
+A cubemap in any of these three layouts can also be **opened**: the program recognises it by itself (a 6:1 strip,
+a 4:3 cross with black empty cells, or the six files `name_f` … `name_d` next to each other — add any of them, they
+count as one photo), turns it into a 4n×2n panorama and works with it as usual. Save it in any format; a panorama
+saved from a cubemap gets GPano.
+
 ## 🪄 AI fill (optional)
 
 A separate mode for what the shots can't fix: one photo only, someone standing in the same place on every shot, a

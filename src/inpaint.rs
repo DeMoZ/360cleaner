@@ -559,7 +559,7 @@ mod tests {
         let preview = crate::processor::load_image(&photo, Some(crate::processor::PREVIEW_DIM)).unwrap();
         let (pw, ph) = preview.dimensions();
         let mask = rasterize(&dabs, pw, ph);
-        let (mut big, _) = crate::export::compose(std::slice::from_ref(&photo), &[], 8192).unwrap();
+        let (mut big, ..) = crate::export::compose(std::slice::from_ref(&photo), &[], 8192).unwrap();
         let mut lama = Lama::load(Path::new(&var("CLEANER360_LAMA"))).unwrap();
         let t = std::time::Instant::now();
         let patches = fill(&mut big, &mask, pw, ph, &mut lama, &|i, n| println!("region {}/{n}", i + 1)).unwrap();

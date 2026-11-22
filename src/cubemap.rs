@@ -3,6 +3,8 @@
 //!
 //! Оси: x — вправо, y — вверх, z — вперёд (середина панорамы). У боковых граней верх — небо; у верхней грани
 //! нижний край прилегает к передней, у нижней — верхний (как у krpano, Pannellum и креста 4×3).
+//!
+//! Обратно (`to_equirect`) — панорама 4n×2n из шести граней: так открываются фото, сохранённые кубической картой.
 
 use image::RgbImage;
 use rayon::prelude::*;
@@ -34,6 +36,11 @@ impl Face {
         }
     }
 
+    /// Место в `ALL`.
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
     /// Направление взгляда в точку грани: `u` — слева направо, `v` — сверху вниз, оба от −1 до 1.
     fn direction(self, u: f32, v: f32) -> [f32; 3] {
         match self {
@@ -44,6 +51,20 @@ impl Face {
             Face::Up => [u, 1.0, v],
             Face::Down => [u, -1.0, -v],
         }
+    }
+}
+
+/// Обратное к `Face::direction`: грань, куда смотрит `d`, и точка на ней (`u`, `v` от −1 до 1).
+fn face_uv([x, y, z]: [f32; 3]) -> (Face, f32, f32) {
+    let (ax, ay, az) = (x.abs(), y.abs(), z.abs());
+    if ax >= ay && ax >= az {
+        if x > 0.0 { (Face::Right, -z / ax, -y / ax) } else { (Face::Left, z / ax, -y / ax) }
+    } else if ay >= az {
+        if y > 0.0 { (Face::Up, x / ay, z / ay) } else { (Face::Down, x / ay, -z / ay) }
+    } else if z > 0.0 {
+        (Face::Front, x / az, -y / az)
+    } else {
+        (Face::Back, -x / az, -y / az)
     }
 }
 
@@ -106,6 +127,56 @@ pub fn sample(eq: &RgbImage, d: [f32; 3]) -> [u8; 3] {
         }
     }
     acc.map(|v| v.round().clamp(0.0, 255.0) as u8)
+}
+
+/// Бикубическая выборка внутри грани в точке (`fx`, `fy`) в пикселях; за краем — крайние пиксели.
+fn sample_face(face: &RgbImage, fx: f32, fy: f32) -> [u8; 3] {
+    let n = face.width() as i64;
+    let (x0, y0) = (fx.floor(), fy.floor());
+    let (wx, wy) = (cubic_weights(fx - x0), cubic_weights(fy - y0));
+    let (x0, y0) = (x0 as i64, y0 as i64);
+    let raw = face.as_raw();
+    let mut acc = [0f32; 3];
+    for (j, &ky) in wy.iter().enumerate() {
+        let row = (y0 + j as i64 - 1).clamp(0, n - 1) as usize * n as usize;
+        for (i, &kx) in wx.iter().enumerate() {
+            let col = (x0 + i as i64 - 1).clamp(0, n - 1) as usize;
+            let p = &raw[(row + col) * 3..(row + col) * 3 + 3];
+            let k = kx * ky;
+            for c in 0..3 {
+                acc[c] += p[c] as f32 * k;
+            }
+        }
+    }
+    acc.map(|v| v.round().clamp(0.0, 255.0) as u8)
+}
+
+/// Панорама 4n×2n из шести квадратных граней `faces` (порядок `Face::ALL`) со стороной n: та же плотность
+/// пикселей на экваторе, что у граней.
+pub fn to_equirect(faces: &[RgbImage; 6]) -> RgbImage {
+    let n = faces[0].width();
+    let (w, h) = (4 * n, 2 * n);
+    let mut out = RgbImage::new(w, h);
+    let half = n as f32 / 2.0;
+    out.par_chunks_mut(w as usize * 3).enumerate().for_each(|(y, row)| {
+        let lat = (0.5 - (y as f32 + 0.5) / h as f32) * PI;
+        let (sl, cl) = lat.sin_cos();
+        for (x, px) in row.as_chunks_mut::<3>().0.iter_mut().enumerate() {
+            let lon = ((x as f32 + 0.5) / w as f32 - 0.5) * TAU;
+            let (so, co) = lon.sin_cos();
+            let (face, u, v) = face_uv([cl * so, sl, cl * co]);
+            px.copy_from_slice(&sample_face(&faces[face.index()], (u + 1.0) * half - 0.5, (v + 1.0) * half - 0.5));
+        }
+    });
+    out
+}
+
+/// Шесть граней (порядок `Face::ALL`) из картинки, где они разложены клетками `cells` со стороной `n`.
+pub fn split_layout(img: &RgbImage, n: u32, cells: &[Cell]) -> [RgbImage; 6] {
+    Face::ALL.map(|face| {
+        let &(_, col, line) = cells.iter().find(|c| c.0 == face).expect("all six faces in layout");
+        image::imageops::crop_imm(img, col * n, line * n, n, n).to_image()
+    })
 }
 
 /// Кусок `tw`×`th` от точки (`x0`, `y0`) картинки из граней `cells` со стороной `n`; вне граней — чёрный.
@@ -190,6 +261,37 @@ mod tests {
         // левый край верхней — верхний край левой
         let l = render_face(&eq, n, Face::Left);
         assert!(near(*u.get_pixel(0, n / 3), *l.get_pixel(n / 3, 0)));
+    }
+
+    #[test]
+    fn faces_back_to_panorama() {
+        let eq = panorama(1024);
+        let n = face_size(1024);
+        for cells in [&STRIP[..], &CROSS[..]] {
+            let layout = render(&eq, n, cells);
+            let back = to_equirect(&split_layout(&layout, n, cells));
+            assert_eq!(back.dimensions(), eq.dimensions());
+            // кроме шва панорамы (там красный скачет от 255 к 0) и полюсов — те же цвета
+            let mut worst = 0;
+            for y in (40..472).step_by(7) {
+                for x in (8..1016).step_by(5) {
+                    let (a, b) = (eq.get_pixel(x, y), back.get_pixel(x, y));
+                    worst = worst.max((0..3).map(|c| (a[c] as i32 - b[c] as i32).abs()).max().unwrap());
+                }
+            }
+            assert!(worst <= 3, "worst {worst}");
+        }
+    }
+
+    #[test]
+    fn face_uv_inverts_direction() {
+        for face in Face::ALL {
+            for (u, v) in [(0.0, 0.0), (0.5, -0.3), (-0.9, 0.7)] {
+                let (f, u2, v2) = face_uv(face.direction(u, v));
+                assert_eq!(f, face);
+                assert!((u - u2).abs() < 1e-5 && (v - v2).abs() < 1e-5);
+            }
+        }
     }
 
     #[test]
