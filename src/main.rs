@@ -93,12 +93,14 @@ struct Computed {
     /// Пути кадров по порядку и маски кадров 1.. (у одного фото масок нет).
     paths: Vec<PathBuf>,
     alphas: Vec<Alpha>,
-    /// Результат в размере превью: на него ложится ИИ-дорисовка.
-    result: RgbImage,
+    /// Размер превью: в нём маска кисти для ИИ-дорисовки.
+    preview_dims: (u32, u32),
 }
 
 /// До какой ширины склеивается результат для ИИ-дорисовки: вид 512 точек на 24° и шире резче не станет.
 const AI_WIDTH: u32 = 8192;
+/// Ширина результата дорисовки, который показывается в окне.
+const AI_VIEW_WIDTH: u32 = 4096;
 
 /// ИИ-дорисовка: куски для текущего результата (`generation`).
 struct Fill {
@@ -668,9 +670,9 @@ fn compute_worker(rx: Receiver<()>, state: Shared, ui: Ui) {
             // фото или параметры поменялись во время расчёта: этот результат никому не нужен
             continue;
         }
-        msg["result_b64"] = json!(jpeg_b64(&result, 90));
-        st.computed = Some(Computed { generation, paths, alphas, result });
+        st.computed = Some(Computed { generation, paths, alphas, preview_dims: result.dimensions() });
         drop(st);
+        msg["result_b64"] = json!(jpeg_b64(&result, 90));
         msg["mask_b64"] = json!(mask.map(|m| jpeg_b64(&m, 85)));
         ui.send(msg);
     }
@@ -963,7 +965,7 @@ fn ai_fill(state: &Shared, ui: &Ui, dabs: Vec<inpaint::Dab>) {
         ui.error("errWaitPreview", json!({}));
         return;
     };
-    let (paths, alphas, preview) = (computed.paths.clone(), computed.alphas.clone(), computed.result.clone());
+    let (paths, alphas, (pw, ph)) = (computed.paths.clone(), computed.alphas.clone(), computed.preview_dims);
     st.ai.busy = true;
     let model = Arc::clone(&st.ai.model);
     ui.send(ai_msg(&st));
@@ -972,7 +974,6 @@ fn ai_fill(state: &Shared, ui: &Ui, dabs: Vec<inpaint::Dab>) {
     std::thread::spawn(move || {
         let started = std::time::Instant::now();
         let result = (|| -> Result<(RgbImage, Vec<inpaint::Patch>), String> {
-            let (pw, ph) = preview.dimensions();
             let mask = inpaint::rasterize(&dabs, pw, ph);
             if !mask.iter().any(|&m| m) {
                 return Err("empty".into());
@@ -988,11 +989,9 @@ fn ai_fill(state: &Shared, ui: &Ui, dabs: Vec<inpaint::Dab>) {
             let patches = inpaint::fill(&mut big, &mask, pw, ph, lama, &|i, n| {
                 ui.send(json!({"type": "processing", "key": "procAiRegion", "args": {"i": i + 1, "n": n}}));
             })?;
-            let mut shown = preview;
-            for p in &patches {
-                p.apply(&mut shown);
-            }
-            Ok((shown, patches))
+            // в окно — склеенный результат в 4K, а не превью 1400: при увеличении превью идёт квадратиками, и
+            // дорисовка казалась грубее, чем выйдет в файле
+            Ok((processor::downscale(big, AI_VIEW_WIDTH), patches))
         })();
         let mut st = lock(&state);
         st.ai.busy = false;
@@ -1003,7 +1002,7 @@ fn ai_fill(state: &Shared, ui: &Ui, dabs: Vec<inpaint::Dab>) {
                 ui.send(ai_msg(&st));
                 drop(st);
                 ui.send(json!({
-                    "type": "ai_done", "result_b64": jpeg_b64(&shown, 90), "n": n,
+                    "type": "ai_done", "result_b64": jpeg_b64(&shown, 88), "n": n,
                     "ms": started.elapsed().as_millis(),
                 }));
             }
