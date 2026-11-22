@@ -635,6 +635,18 @@ body.drag-bad .drop-card { border-color: rgba(239,68,68,0.6); }
 .swap-state { font-size: 10px; color: var(--text-muted); text-align: center; margin-top: -4px; }
 .hint { font-size: 10px; line-height: 1.5; color: var(--text-muted); }
 .btn-small { padding: 6px 10px; font-size: 11px; width: auto; }
+/* ── ИИ-дорисовка ───────────────────────────────────── */
+.logo-badge.ai { color: var(--accent-violet); background: rgba(139,92,246,0.12); border-color: rgba(139,92,246,0.4); }
+.ai-badge { font-size: 9px; font-weight: 700; letter-spacing: .04em; padding: 1px 5px; border-radius: 4px; margin-left: 6px;
+  color: var(--accent-violet); border: 1px solid rgba(139,92,246,0.5); vertical-align: 1px; }
+.ai-tools { display: none; flex-direction: column; gap: 8px; }
+.ai-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ai-row .btn-small { flex: 1; }
+.btn-ghost.on { border-color: var(--accent-violet); color: var(--text-primary); background: rgba(139,92,246,0.15); }
+.ai-progress { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; display: none; }
+.ai-progress > div { height: 100%; width: 0; background: var(--accent-violet); transition: width .3s; }
+.ai-model { font-size: 11px; color: var(--text-secondary); }
+#aspectFrame.brush { cursor: none; }
 
 /* ── Toasts ─────────────────────────────────────────────── */
 .toasts { position: fixed; right: 16px; bottom: 40px; display: flex; flex-direction: column; gap: 8px; z-index: 200; max-width: 420px; }
@@ -737,7 +749,7 @@ body.drag-on .photo-strip { border-top-color: var(--accent-blue); }
   <div class="logo">
     <div class="logo-icon">🌐</div>
     <span class="logo-text">360Cleaner</span>
-    <span class="logo-badge">No AI</span>
+    <span class="logo-badge" id="logoBadge">No AI</span>
   </div>
 
   <div class="header-sep"></div>
@@ -816,6 +828,36 @@ body.drag-on .photo-strip { border-top-color: var(--accent-blue); }
         <span data-i18n="swap"></span>
       </button>
       <div class="swap-state" id="swapState"></div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="sidebar-section" id="aiSection">
+      <div class="section-label"><span data-i18n="secAi"></span><span class="ai-badge">AI</span></div>
+      <label class="check" data-i18n-title="aiEnableTip"><input type="checkbox" id="aiEnable" onchange="send('ai_enable',{value:this.checked})"> <span data-i18n="aiEnable"></span></label>
+      <div class="hint" id="aiHint"></div>
+      <div class="ai-model" id="aiModel"></div>
+      <div class="ai-progress" id="aiProgress"><div></div></div>
+      <button class="btn btn-ghost btn-small" id="aiDownloadBtn" onclick="send('ai_download')" style="display:none"></button>
+      <div class="ai-tools" id="aiTools">
+        <div class="ai-row">
+          <button class="btn btn-ghost btn-small" id="aiBrushBtn" onclick="toggleBrush()" data-i18n-title="aiBrushTip">🖌 <span data-i18n="aiBrush"></span></button>
+        </div>
+        <div class="slider-block">
+          <div class="slider-row">
+            <span class="slider-name" data-i18n="aiBrushSize"></span>
+            <span class="slider-val" id="v_brush">30 px</span>
+          </div>
+          <input type="range" id="brushSize" min="4" max="150" value="30" oninput="$('v_brush').textContent=this.value+' px'; requestRender()">
+        </div>
+        <div class="hint" data-i18n="aiBrushHint"></div>
+        <div class="ai-row">
+          <button class="btn btn-ghost btn-small" id="aiUndoBtn" onclick="undoStroke()" data-i18n="aiUndo"></button>
+          <button class="btn btn-ghost btn-small" id="aiClearBtn" onclick="clearStrokes()" data-i18n="aiClear"></button>
+        </div>
+        <button class="btn btn-violet" id="aiFillBtn" onclick="aiFill()" disabled>✨ <span data-i18n="aiFill"></span></button>
+        <label class="check"><input type="checkbox" id="aiMarks" checked onchange="requestRender()"> <span data-i18n="aiMarks"></span></label>
       </div>
     </div>
 
@@ -1018,7 +1060,8 @@ function applyLanguage() {
   }
   sel.value = langSetting;
   $('swapState').textContent = t(swap ? 'swapped' : 'swapHint');
-  $('loadingLabel').textContent = t(loadingKey);
+  $('loadingLabel').textContent = t(loadingKey, loadingArgs);
+  renderAi();
   render360Button();
   renderPhotos();
   renderStatus();
@@ -1057,6 +1100,14 @@ let update = { checking: false, downloading: false, available: null, writable: f
 let curStatus = { key: 'stReady', args: {}, state: '' };
 let angles = null;
 let loadingKey = 'procDefault';
+let loadingArgs = {};
+/** ИИ-дорисовка: состояние от Rust, мазки кисти (штрихи из точек {u, v, r, erase} в долях панорамы). */
+let ai = { enabled: false, model: 'missing', busy: false, filled: false, pct: 0, mb: 0, totalMb: 208 };
+let strokes = [];
+let brushActive = false, painting = false, brushPos = null;
+/** Результат без дорисовки: к нему возвращается «Очистить». */
+let plainResultSrc = null;
+const maskCanvas = document.createElement('canvas');
 
 const images = { result: null, mask: null };
 const $ = id => document.getElementById(id);
@@ -1089,6 +1140,8 @@ window.onRustMessage = function (msg) {
       $('exportFormat').value = exportFormat;
       $('quality').value = msg.exportQuality || 85;
       $('v_quality').textContent = $('quality').value;
+      ai.enabled = !!msg.aiFill;
+      ai.totalMb = msg.aiModelMb || ai.totalMb;
       applyLanguage();
       if (msg.updateFailed) toast(esc(t('updateFailedToast')), 'err', [], true);
       break;
@@ -1110,6 +1163,7 @@ window.onRustMessage = function (msg) {
       hasPreview = false;
       if (currentTab.startsWith('photo:') && !ids.has(currentTab.slice(6))) switchTab('result');
       if (!photos.length) {
+        strokes = [];
         images.result = images.mask = null;
         angles = stackInfo = null;
         renderAngles();
@@ -1136,8 +1190,36 @@ window.onRustMessage = function (msg) {
 
     case 'processing':
       loadingKey = msg.key;
-      showLoading(true, t(msg.key));
-      setStatus(msg.key, {}, 'busy');
+      loadingArgs = msg.args || {};
+      showLoading(true, t(msg.key, loadingArgs));
+      setStatus(msg.key, loadingArgs, 'busy');
+      break;
+
+    case 'ai':
+      Object.assign(ai, { enabled: msg.enabled, model: msg.model, busy: msg.busy, filled: msg.filled });
+      if (!ai.enabled && brushActive) toggleBrush();
+      renderAi();
+      break;
+
+    case 'ai_progress':
+      ai.pct = msg.pct; ai.mb = msg.mb;
+      renderAi();
+      break;
+
+    case 'ai_done':
+      showLoading(false);
+      loadImg('result', 'data:image/jpeg;base64,' + msg.result_b64);
+      if (brushActive) toggleBrush();
+      switchTab('result');
+      setStatus('stAiDone', { n: msg.n, s: (msg.ms / 1000).toFixed(1) }, 'ready');
+      break;
+
+    case 'ai_failed':
+      showLoading(false);
+      break;
+
+    case 'ai_cleared':
+      if (plainResultSrc) loadImg('result', plainResultSrc);
       break;
 
     case 'preview_ready':
@@ -1146,7 +1228,10 @@ window.onRustMessage = function (msg) {
       $('emptyState').style.display = 'none';
       images.mask = null;
       if (msg.mask_b64) loadImg('mask', 'data:image/jpeg;base64,' + msg.mask_b64);
-      loadImg('result', 'data:image/jpeg;base64,' + msg.result_b64);
+      plainResultSrc = 'data:image/jpeg;base64,' + msg.result_b64;
+      // новый результат: прежняя дорисовка к нему не относится, мазки остаются — можно дорисовать снова
+      ai.filled = false;
+      loadImg('result', plainResultSrc);
       if (currentTab.startsWith('photo:') || (currentTab === 'mask' && !msg.mask_b64)) switchTab('result');
       angles = stackInfo = null;
       if (msg.count === 2) angles = { a: msg.angle_a.toFixed(0), b: msg.angle_b.toFixed(0), p: (msg.changed * 100).toFixed(1), ms: msg.ms };
@@ -1249,6 +1334,7 @@ function updateButtons() {
   $('swapBlock').style.display = photos.length === 2 ? 'flex' : 'none';
   $('saveBtn').disabled = !hasPreview;
   $('detectSection').classList.toggle('off', photos.length < 2);
+  renderAi();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1464,7 +1550,21 @@ function renderFlat(img) {
   ctx.scale(currentZoom, currentZoom);
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  // закрашенное кистью: красным, пока кисть в руке; после дорисовки — отметка, что это нарисовал ИИ
+  if (currentTab === 'result' && strokes.length && (brushActive || $('aiMarks').checked)) {
+    ctx.globalAlpha = brushActive ? 0.5 : 0.28;
+    ctx.drawImage(maskCanvas, -dw / 2, -dh / 2, dw, dh);
+    ctx.globalAlpha = 1;
+  }
   ctx.restore();
+  if (brushActive && brushPos) {
+    const r = brushRadiusPx();
+    ctx.beginPath();
+    ctx.arc(brushPos.x, brushPos.y, r, 0, 2 * Math.PI);
+    ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
+    ctx.strokeStyle = brushPos.erase ? 'rgba(255,255,255,0.9)' : 'rgba(239,68,68,0.95)';
+    ctx.stroke();
+  }
 }
 
 // ── Сфера WebGL ───────────────────────────────────────────
@@ -1546,10 +1646,29 @@ function requestRender() {
 }
 
 const frame = $('aspectFrame');
-frame.addEventListener('mousedown', e => { isDragging = true; lastMX = e.clientX; lastMY = e.clientY; });
-frame.addEventListener('dblclick', resetZoom);
-window.addEventListener('mouseup', () => isDragging = false);
+frame.addEventListener('mousedown', e => {
+  // кисть: рисует левая кнопка; с Shift — двигать картинку, с Alt (Option) — стирать
+  if (brushActive && !is360Mode && e.button === 0 && !e.shiftKey) {
+    painting = true;
+    strokes.push([]);
+    addDab(e);
+    return;
+  }
+  isDragging = true; lastMX = e.clientX; lastMY = e.clientY;
+});
+frame.addEventListener('dblclick', e => { if (!brushActive) resetZoom(); });
+window.addEventListener('mouseup', () => {
+  isDragging = false;
+  if (painting) { painting = false; if (!strokes[strokes.length - 1].length) strokes.pop(); updateButtons(); }
+});
+frame.addEventListener('mouseleave', () => { brushPos = null; if (brushActive) requestRender(); });
 window.addEventListener('mousemove', e => {
+  if (brushActive && !is360Mode) {
+    brushPos = canvasPoint(e);
+    brushPos.erase = e.altKey;
+    if (painting) addDab(e);
+    requestRender();
+  }
   if (!isDragging) return;
   const dx = e.clientX - lastMX, dy = e.clientY - lastMY;
   lastMX = e.clientX; lastMY = e.clientY;
@@ -1576,6 +1695,7 @@ window.addEventListener('keydown', e => {
   if (mod && e.code === 'KeyQ') { e.preventDefault(); send('quit'); return; }
   if (mod && e.code === 'KeyS') { e.preventDefault(); saveResult(); return; }
   if (mod && e.code === 'KeyO') { e.preventDefault(); send('pick'); return; }
+  if (mod && e.code === 'KeyZ' && ai.enabled && strokes.length && e.target.tagName !== 'INPUT') { e.preventDefault(); undoStroke(); return; }
   if (e.key === 'Escape') { closeModal('donateModal'); closeModal('updateModal'); return; }
   if (mod || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
   if (document.querySelector('.modal-backdrop.open')) return;
@@ -1584,6 +1704,7 @@ window.addEventListener('keydown', e => {
   if (tabs[e.code]) switchTab(tabs[e.code]);
   else if (digit) { const p = photos[+digit[1] - 3]; if (p) showPhoto(p.id); }
   else if (e.code === 'KeyS') toggleSwap();
+  else if (e.code === 'KeyB' && ai.enabled && ai.model === 'ready') toggleBrush();
   else if (e.code === 'Space') { e.preventDefault(); toggle360(); }
   else if (e.key === '+' || e.code === 'Equal') changeZoom(0.15);
   else if (e.key === '-' || e.code === 'Minus') changeZoom(-0.15);
@@ -1601,6 +1722,122 @@ function setStatus(key, args, state) {
 function renderStatus() {
   $('statusMsg').textContent = t(curStatus.key, curStatus.args);
   $('statusDot').className = 'status-dot' + (curStatus.state ? ' ' + curStatus.state : '');
+}
+
+// ════════════════════════════════════════════════════════════
+// ИИ-дорисовка: кисть и окно режима
+// ════════════════════════════════════════════════════════════
+function renderAi() {
+  $('aiEnable').checked = ai.enabled;
+  // значок в шапке: без нейросетей — только пока режим ИИ выключен
+  $('logoBadge').textContent = ai.enabled ? 'AI fill' : 'No AI';
+  $('logoBadge').classList.toggle('ai', ai.enabled);
+  $('aiHint').textContent = t('aiHint', { mb: ai.totalMb });
+  const ready = ai.model === 'ready';
+  const dl = ai.model === 'downloading';
+  $('aiModel').style.display = ai.enabled ? '' : 'none';
+  $('aiModel').textContent = !ai.enabled ? '' : ready ? t('aiModelReady')
+    : dl ? t('aiDownloading', { pct: ai.pct, mb: ai.mb, total: ai.totalMb }) : t('aiModelMissing');
+  $('aiProgress').style.display = ai.enabled && dl ? 'block' : 'none';
+  $('aiProgress').firstElementChild.style.width = ai.pct + '%';
+  $('aiDownloadBtn').style.display = ai.enabled && ai.model === 'missing' ? '' : 'none';
+  $('aiDownloadBtn').textContent = t('aiDownload', { mb: ai.totalMb });
+  $('aiTools').style.display = ai.enabled && ready ? 'flex' : 'none';
+  $('aiBrushBtn').classList.toggle('on', brushActive);
+  $('aiFillBtn').disabled = !hasPreview || ai.busy || !strokes.length;
+  $('aiUndoBtn').disabled = !strokes.length;
+  $('aiClearBtn').disabled = !strokes.length && !ai.filled;
+}
+
+function toggleBrush() {
+  brushActive = !brushActive;
+  if (brushActive) {
+    if (is360Mode) toggle360();
+    if (currentTab !== 'result') switchTab('result');
+  }
+  frame.classList.toggle('brush', brushActive);
+  brushPos = null;
+  drawMask();
+  renderAi();
+  requestRender();
+}
+
+/** Точка мыши в пикселях холста. */
+function canvasPoint(e) {
+  const c = $('flat-canvas');
+  const rect = c.getBoundingClientRect();
+  return { x: (e.clientX - rect.left) * c.width / rect.width, y: (e.clientY - rect.top) * c.height / rect.height };
+}
+
+function brushRadiusPx() { return +$('brushSize').value * (window.devicePixelRatio || 1) / 2; }
+
+/** Где на панораме точка холста (как в renderFlat): u, v от 0 до 1 и размер картинки на холсте. */
+function panoPoint(p) {
+  const img = images.result;
+  if (!img) return null;
+  const c = $('flat-canvas');
+  const cw = c.width, ch = c.height, ir = img.naturalWidth / img.naturalHeight;
+  let dw, dh;
+  if (cw / ch > ir) { dh = ch; dw = dh * ir; } else { dw = cw; dh = dw / ir; }
+  const u = ((p.x - cw / 2 - flatPanX) / currentZoom + dw / 2) / dw;
+  const v = ((p.y - ch / 2 - flatPanY) / currentZoom + dh / 2) / dh;
+  return { u, v, dw };
+}
+
+function addDab(e) {
+  const q = panoPoint(canvasPoint(e));
+  if (!q) return;
+  const r = brushRadiusPx() / (q.dw * currentZoom);
+  if (q.v < -r || q.v > 1 + r) return;
+  const stroke = strokes[strokes.length - 1];
+  const last = stroke[stroke.length - 1];
+  // точки штриха — не чаще трети радиуса
+  if (last && Math.hypot(last.u - q.u, (last.v - q.v) / 2) < r / 3 && last.erase === e.altKey) return;
+  stroke.push({ u: ((q.u % 1) + 1) % 1, v: q.v, r, erase: e.altKey });
+  drawMask();
+  renderAi();
+}
+
+/** Маска мазков в размере результата (для показа поверх картинки); по горизонтали замкнута. */
+function drawMask() {
+  const img = images.result;
+  if (!img) return;
+  maskCanvas.width = img.naturalWidth;
+  maskCanvas.height = img.naturalHeight;
+  const m = maskCanvas.getContext('2d');
+  const w = maskCanvas.width, h = maskCanvas.height;
+  m.clearRect(0, 0, w, h);
+  m.fillStyle = brushActive ? '#ef4444' : '#8b5cf6';
+  for (const stroke of strokes) for (const d of stroke) {
+    m.globalCompositeOperation = d.erase ? 'destination-out' : 'source-over';
+    for (const shift of [-1, 0, 1]) {
+      m.beginPath();
+      m.arc((d.u + shift) * w, d.v * h, d.r * w, 0, 2 * Math.PI);
+      m.fill();
+    }
+  }
+  m.globalCompositeOperation = 'source-over';
+}
+
+function undoStroke() {
+  strokes.pop();
+  drawMask();
+  renderAi();
+  requestRender();
+}
+
+function clearStrokes() {
+  strokes = [];
+  drawMask();
+  if (ai.filled) send('ai_clear');
+  renderAi();
+  requestRender();
+}
+
+function aiFill() {
+  if (!strokes.length || ai.busy) return;
+  const dabs = strokes.flat();
+  send('ai_fill', { dabs });
 }
 
 function renderAngles() {

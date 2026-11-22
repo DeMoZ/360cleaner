@@ -21,6 +21,8 @@ pub struct Settings {
     pub export_quality: u8,
     /// Панорама или кубическая карта.
     pub export_format: crate::export::Format,
+    /// Режим ИИ-дорисовки (по умолчанию выключен).
+    pub ai_fill: bool,
 }
 
 /// Ниже этого качества JPEG панорама заметно портится.
@@ -40,6 +42,7 @@ impl Default for Settings {
             export_width: 0,
             export_quality: 85,
             export_format: Default::default(),
+            ai_fill: false,
         }
     }
 }

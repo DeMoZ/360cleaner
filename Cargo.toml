@@ -3,7 +3,7 @@ name = "cleaner360"
 version = "0.6.0"
 edition = "2024"
 authors = ["DeMoZ"]
-description = "Убирает фотографа и людей с 360° панорамы по двум кадрам, без нейросетей"
+description = "Убирает фотографа и людей с 360° панорамы по кадрам с одной точки; ИИ-дорисовка — отдельный режим"
 repository = "https://github.com/DeMoZ/360cleaner"
 license = "MIT"
 publish = false
@@ -21,6 +21,8 @@ sha2 = "0.10"
 sys-locale = "0.3"
 jpeg-encoder = { version = "0.7.1", features = ["simd"] }
 fast_image_resize = { version = "6.1.0", features = ["rayon"] }
+# ИИ-дорисовка (отдельный режим): ONNX Runtime вшит в программу, скачивается при сборке с cdn.pyke.io
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "tls-native", "api-31"] }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

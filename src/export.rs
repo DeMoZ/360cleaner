@@ -3,6 +3,7 @@
 //! сохранить кубическую карту: шесть файлов граней, полосу 6×1 или крест 4×3 (`cubemap`).
 
 use crate::cubemap::{self, Cell, Face};
+use crate::inpaint;
 use crate::processor::{self, Alpha};
 use crate::xmp;
 use fast_image_resize::images::Image;
@@ -152,11 +153,12 @@ pub struct Saved {
 
 /// Кадр 0 — основа (его размер и метаданные), кадры 1.. смешиваются в него по маскам `alphas` (по одной на кадр).
 /// В памяти одновременно только два кадра.
-pub fn export(paths: &[PathBuf], alphas: &[Alpha], options: Options, out: &Path) -> Result<Saved, String> {
+/// Результат шириной `width` (0 — исходная): кадры по маскам `alphas`. Второе — исходный размер первого кадра.
+pub fn compose(paths: &[PathBuf], alphas: &[Alpha], width: u32) -> Result<(RgbImage, (u32, u32)), String> {
     let first = paths.first().ok_or("no photos")?;
     let base = processor::load_image(first, None)?;
     let (w0, h0) = base.dimensions();
-    let (w, h) = target_dims(w0, h0, options.width);
+    let (w, h) = target_dims(w0, h0, width);
     let mut base = resize_to(base, w, h)?;
     for (path, alpha) in paths[1..].iter().zip(alphas) {
         // кадр, из которого ничего не берётся, незачем открывать
@@ -165,6 +167,23 @@ pub fn export(paths: &[PathBuf], alphas: &[Alpha], options: Options, out: &Path)
         }
         let other = resize_to(processor::load_image(path, None)?, w, h)?;
         processor::blend_into(&mut base, &other, alpha);
+    }
+    Ok((base, (w0, h0)))
+}
+
+/// `patches` — куски ИИ-дорисовки (пусто, если её нет): ложатся поверх склеенных кадров.
+pub fn export(
+    paths: &[PathBuf],
+    alphas: &[Alpha],
+    patches: &[inpaint::Patch],
+    options: Options,
+    out: &Path,
+) -> Result<Saved, String> {
+    let first = paths.first().ok_or("no photos")?;
+    let (mut base, (w0, h0)) = compose(paths, alphas, options.width)?;
+    let (w, h) = base.dimensions();
+    for patch in patches {
+        patch.apply(&mut base);
     }
     let markers = std::fs::read(first).map(|b| xmp::extract_jpeg_markers(&b)).unwrap_or_default();
     let files = output_paths(out, options.format);
@@ -339,7 +358,7 @@ mod tests {
         let p = Params { dilate: 6, feather: 3, ..Default::default() };
         let preview = processor::compute_preview(&small(&a), &small(&b), p);
         let saved =
-            export(&[a, b], &[preview.alpha], Options { width: 0, quality: 95, format: Format::Equirect }, &out)
+            export(&[a, b], &[preview.alpha], &[], Options { width: 0, quality: 95, format: Format::Equirect }, &out)
                 .unwrap();
         assert_eq!((saved.width, saved.height), (w, h));
 
@@ -359,9 +378,14 @@ mod tests {
         let (w, h) = (1600u32, 800u32);
         let (a, out) = (dir.0.join("a.jpg"), dir.0.join("out.jpg"));
         std::fs::write(&a, xmp::inject_markers(&jpeg(&frame(w, h, 300)), &[gpano(w, h)])).unwrap();
-        let saved =
-            export(std::slice::from_ref(&a), &[], Options { width: 800, quality: 80, format: Format::Equirect }, &out)
-                .unwrap();
+        let saved = export(
+            std::slice::from_ref(&a),
+            &[],
+            &[],
+            Options { width: 800, quality: 80, format: Format::Equirect },
+            &out,
+        )
+        .unwrap();
         assert_eq!((saved.width, saved.height), (800, 400));
         let bytes = std::fs::read(&out).unwrap();
         assert_eq!(xmp::extract_jpeg_markers(&bytes), vec![gpano(800, 400)]);
@@ -400,6 +424,7 @@ mod tests {
             let saved = export(
                 std::slice::from_ref(&a),
                 &[],
+                &[],
                 Options { width: 4096, quality: q, format: Format::Equirect },
                 &out,
             )
@@ -423,7 +448,7 @@ mod tests {
         let options = |format| Options { width: 0, quality: 85, format };
 
         let out = dir.0.join("pano.jpg");
-        let saved = export(std::slice::from_ref(&a), &[], options(Format::CubeFiles), &out).unwrap();
+        let saved = export(std::slice::from_ref(&a), &[], &[], options(Format::CubeFiles), &out).unwrap();
         assert_eq!((saved.width, saved.height), (400, 400));
         let names: Vec<String> = saved.files.iter().map(|p| p.file_name().unwrap().to_string_lossy().into()).collect();
         assert_eq!(names, ["pano_f.jpg", "pano_r.jpg", "pano_b.jpg", "pano_l.jpg", "pano_u.jpg", "pano_d.jpg"]);
@@ -439,11 +464,11 @@ mod tests {
         assert_eq!(total, saved.bytes);
 
         let strip = dir.0.join("strip.jpg");
-        let saved = export(std::slice::from_ref(&a), &[], options(Format::CubeStrip), &strip).unwrap();
+        let saved = export(std::slice::from_ref(&a), &[], &[], options(Format::CubeStrip), &strip).unwrap();
         assert_eq!((saved.width, saved.height, saved.files.len()), (2400, 400, 1));
         assert_eq!(image::open(&strip).unwrap().to_rgb8().dimensions(), (2400, 400));
         let cross = dir.0.join("cross.jpg");
-        let saved = export(std::slice::from_ref(&a), &[], options(Format::CubeCross), &cross).unwrap();
+        let saved = export(std::slice::from_ref(&a), &[], &[], options(Format::CubeCross), &cross).unwrap();
         assert_eq!((saved.width, saved.height), (1600, 1200));
     }
 
@@ -459,7 +484,8 @@ mod tests {
         std::fs::write(&a, jpeg(&img)).unwrap();
         for format in [Format::CubeFiles, Format::CubeCross] {
             let est = estimate_sizes(&a, 0, format, &[85]).unwrap()[0].1;
-            let saved = export(std::slice::from_ref(&a), &[], Options { width: 0, quality: 85, format }, &out).unwrap();
+            let saved =
+                export(std::slice::from_ref(&a), &[], &[], Options { width: 0, quality: 85, format }, &out).unwrap();
             let err = est as f64 / saved.bytes as f64 - 1.0;
             assert!(err.abs() < 0.1, "{format:?}: estimate {est}, saved {}", saved.bytes);
         }
@@ -472,7 +498,7 @@ mod tests {
     fn cross_preview() {
         let Some(src) = std::env::var_os("CLEANER360_SAMPLE").map(PathBuf::from) else { return };
         let out = std::env::temp_dir().join("cleaner360_cross.jpg");
-        export(&[src], &[], Options { width: 4096, quality: 85, format: Format::CubeCross }, &out).unwrap();
+        export(&[src], &[], &[], Options { width: 4096, quality: 85, format: Format::CubeCross }, &out).unwrap();
         println!("{}", out.display());
     }
 
@@ -500,7 +526,7 @@ mod tests {
         let small: Vec<RgbImage> = paths.iter().map(|p| processor::load_image(p, Some(400)).unwrap()).collect();
         let s = processor::compute_stack_preview(&small, Params { dilate: 6, feather: 3, ..Default::default() });
         let out = dir.0.join("out.jpg");
-        export(&paths, &s.alphas, Options { width: 0, quality: 90, format: Format::Equirect }, &out).unwrap();
+        export(&paths, &s.alphas, &[], Options { width: 0, quality: 90, format: Format::Equirect }, &out).unwrap();
         let img = image::open(&out).unwrap().to_rgb8();
         for x in [100, 300, 500, 700] {
             assert_eq!(red_count(&img, x), 0, "passer-by left at x={x}");
@@ -524,7 +550,7 @@ mod perf {
         let cube = [(0, 85, Format::CubeFiles), (8192, 85, Format::CubeFiles), (0, 85, Format::CubeCross)];
         for (width, quality, format) in runs.into_iter().chain(cube) {
             let t = std::time::Instant::now();
-            let s = export(std::slice::from_ref(&src), &[], Options { width, quality, format }, &out).unwrap();
+            let s = export(std::slice::from_ref(&src), &[], &[], Options { width, quality, format }, &out).unwrap();
             let mb = s.bytes as f64 / 1_048_576.0;
             println!("{format:?} {}×{} q{quality}: {mb:.2} MB, {:?}", s.width, s.height, t.elapsed());
             let t = std::time::Instant::now();
