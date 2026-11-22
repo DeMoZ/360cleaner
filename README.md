@@ -9,7 +9,7 @@
 [![Release](https://img.shields.io/github/v/release/DeMoZ/360cleaner?label=release&color=3b82f6)](https://github.com/DeMoZ/360cleaner/releases/latest)
 ![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-111827?logo=apple)
 ![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-111827?logo=windows)
-![No AI](https://img.shields.io/badge/No%20AI-classic%20computer%20vision-10b981)
+![No AI by default](https://img.shields.io/badge/No%20AI-by%20default-10b981)
 [![License: MIT](https://img.shields.io/badge/license-MIT-8b5cf6)](LICENSE)
 
 **English** · [Русский](README.ru.md) · [ภาษาไทย](README.th.md)
@@ -33,7 +33,8 @@ how many photos you add:
 | **2** | Photographer | You stand on opposite sides in the two shots; each spot is taken from the shot where you aren't. |
 | **3+** | Passers-by | For crowded places: each area is taken from a shot where nobody is there. |
 
-- **No AI, nothing made up.** Only real pixels from your own shots, at their original sharpness.
+- **No AI, nothing made up — by default.** Only real pixels from your own shots, at their original sharpness. The
+  optional [AI fill](#-ai-fill-optional) mode, off until you turn it on, can paint in what no shot shows.
 - **Stays a 360° photo.** XMP GPano, EXIF and the ICC profile are carried over, so Google Photos, Facebook, VR
   headsets and Insta360 Studio open the result as a sphere.
 - **What you see is what you save.** The saved file matches the preview exactly.
@@ -44,7 +45,7 @@ how many photos you add:
 Download the latest version from [**Releases**](https://github.com/DeMoZ/360cleaner/releases/latest).
 
 <details open>
-<summary><b>macOS</b> (Apple Silicon)</summary>
+<summary><b>macOS</b> 13.4 or newer (Apple Silicon)</summary>
 
 1. Open `360Cleaner-macOS-v….dmg` and drag the app to **Applications**.
 2. The app isn't signed with an Apple certificate, so macOS blocks the first launch: click **Done**, open
@@ -110,6 +111,23 @@ Instead of the 2:1 panorama you can save a **cubemap**: six square 90° views fo
 Front is the middle of the panorama. The top of the up face and the bottom of the down face point backwards. EXIF
 and the ICC profile are kept; GPano isn't written, since a face is no longer a sphere.
 
+## 🪄 AI fill (optional)
+
+A separate mode for what the shots can't fix: one photo only, someone standing in the same place on every shot, a
+tripod leg. Paint over it and the [LaMa](https://github.com/advimman/lama) model draws what could be behind it.
+
+1. Turn on **Fill in with AI** in the **AI fill** section. The first time, the model is downloaded (208 MB, from
+   [Carve/LaMa-ONNX](https://huggingface.co/Carve/LaMa-ONNX), Apache-2.0) and checked by SHA-256.
+2. Pick the **Brush** (<kbd>B</kbd>) and paint on the result in the flat view. <kbd>Alt</kbd>/<kbd>Option</kbd> erases,
+   <kbd>Shift</kbd> + drag moves the picture, <kbd>⌘/Ctrl</kbd>+<kbd>Z</kbd> undoes a stroke.
+3. Press **Fill in**. Each painted area is filled in its own perspective view, so the panorama's distortion near the
+   poles doesn't get in the way; the first fill also loads the model (about 5 s), then 2–3 s per area.
+
+Everything runs on your computer; photos aren't sent anywhere. What the model paints is made up, not photographed:
+filled areas are marked in the window, and the saved file gets `_ai` in its name. The model works at 512×512, so a
+large area (a person right next to the camera) comes out softer than the rest of an 8K panorama. An area wider than
+about 120° is refused: paint it in parts.
+
 ## 🎛 Settings
 
 | Setting | What it does |
@@ -125,7 +143,8 @@ and the ICC profile are kept; GPano isn't written, since a face is no longer a s
 | **Aspect ratio** | 2:1, 16:9, 4:3, 1:1, 9:16 or 4:5 frame, for viewing only. |
 
 **Keys:** <kbd>1</kbd> result · <kbd>2</kbd> difference map · <kbd>3</kbd>–<kbd>9</kbd> photos · <kbd>S</kbd> swap
-zones · <kbd>Space</kbd> 360° · <kbd>⌘/Ctrl</kbd>+<kbd>O</kbd> add photos · <kbd>⌘/Ctrl</kbd>+<kbd>S</kbd> save
+zones · <kbd>B</kbd> AI brush · <kbd>Space</kbd> 360° · <kbd>⌘/Ctrl</kbd>+<kbd>O</kbd> add photos · <kbd>⌘/Ctrl</kbd>+<kbd>S</kbd>
+save
 
 ## 🛠 Build from source
 
@@ -145,4 +164,5 @@ The app is free. The **Support** button in the window lists ways to donate; the 
 
 ## 📄 License
 
-[MIT](LICENSE).
+[MIT](LICENSE). Built in: [ONNX Runtime](https://onnxruntime.ai) (MIT) through [ort](https://github.com/pykeio/ort)
+(MIT / Apache-2.0). Downloaded on first use of AI fill: the LaMa model (Apache-2.0).

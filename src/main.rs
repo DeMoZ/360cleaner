@@ -1,6 +1,7 @@
 //! 360Cleaner — убирает фотографа и людей с 360° панорамы по кадрам с одной точки.
 //! Одно фото — только пересохранение (размер, качество), два — фотограф, три и больше — прохожие.
-//! Окно: tao + wry (системный WebView), обработка: Rayon. Без нейросетей.
+//! Окно: tao + wry (системный WebView), обработка: Rayon. Без нейросетей, кроме отдельного режима ИИ-дорисовки
+//! (`inpaint`), который включается в окне и по умолчанию выключен.
 //!
 //! Потоки. WebView живёт только в главном потоке, поэтому всё, что идёт в окно, отправляется событием
 //! `UserEvent::Js` через `EventLoopProxy` и выполняется там. Диалоги выбора файла тоже открываются в главном потоке
@@ -13,6 +14,7 @@ mod cubemap;
 mod donations;
 mod export;
 mod i18n;
+mod inpaint;
 mod net;
 mod processor;
 mod settings;
@@ -91,6 +93,27 @@ struct Computed {
     /// Пути кадров по порядку и маски кадров 1.. (у одного фото масок нет).
     paths: Vec<PathBuf>,
     alphas: Vec<Alpha>,
+    /// Результат в размере превью: на него ложится ИИ-дорисовка.
+    result: RgbImage,
+}
+
+/// До какой ширины склеивается результат для ИИ-дорисовки: вид 512 точек на 24° и шире резче не станет.
+const AI_WIDTH: u32 = 8192;
+
+/// ИИ-дорисовка: куски для текущего результата (`generation`).
+struct Fill {
+    generation: u64,
+    patches: Vec<inpaint::Patch>,
+}
+
+#[derive(Default)]
+struct AiState {
+    downloading: bool,
+    busy: bool,
+    fill: Option<Fill>,
+    /// Модель загружается при первой дорисовке (несколько секунд) и остаётся; свой замок — чтобы долгий расчёт
+    /// не держал общее состояние.
+    model: Arc<Mutex<Option<inpaint::Lama>>>,
 }
 
 #[derive(Default)]
@@ -117,6 +140,7 @@ struct State {
     donations: Vec<u8>,
     donations_loading: bool,
     updates: UpdateState,
+    ai: AiState,
     /// Запрос пересчитать примерный вес файла (`estimate_worker`).
     estimate: Sender<()>,
 }
@@ -152,6 +176,8 @@ struct Request {
     value: Option<bool>,
     #[serde(default)]
     lang: Option<String>,
+    #[serde(default)]
+    dabs: Option<Vec<inpaint::Dab>>,
 }
 
 fn jpeg_bytes(img: &RgbImage, quality: u8) -> Result<Vec<u8>, String> {
@@ -204,6 +230,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         donations: donations::cached(),
         donations_loading: false,
         updates: UpdateState::default(),
+        ai: AiState::default(),
         estimate: estimate_tx,
     }));
 
@@ -308,7 +335,10 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
                 "autoUpdate": st.settings.auto_update,
                 "canUpdate": update::install_target().is_some(),
                 "updateFailed": std::env::args().any(|a| a == "--update-failed"),
+                "aiFill": st.settings.ai_fill,
+                "aiModelMb": inpaint::MODEL_BYTES / 1_000_000,
             }));
+            ui.send(ai_msg(&st));
             let auto = st.settings.auto_update
                 && update::install_target().is_some()
                 && settings::now().saturating_sub(st.settings.last_update_check) >= 86_400;
@@ -418,6 +448,23 @@ fn handle_request(req: Request, state: &Shared, ui: &Ui, proxy: &EventLoopProxy<
             let mut st = lock(state);
             st.settings.auto_update = req.value.unwrap_or(true);
             st.settings.save();
+        }
+        "ai_enable" => {
+            let mut st = lock(state);
+            st.settings.ai_fill = req.value.unwrap_or(false);
+            st.settings.save();
+            let start = st.settings.ai_fill && !inpaint::model_ready();
+            ui.send(ai_msg(&st));
+            drop(st);
+            if start {
+                download_model(state, ui);
+            }
+        }
+        "ai_download" => download_model(state, ui),
+        "ai_fill" => ai_fill(state, ui, req.dabs.unwrap_or_default()),
+        "ai_clear" => {
+            lock(state).ai.fill = None;
+            ui.send(json!({"type": "ai_cleared"}));
         }
         other => eprintln!("unknown action from the window: {other}"),
     }
@@ -621,9 +668,9 @@ fn compute_worker(rx: Receiver<()>, state: Shared, ui: Ui) {
             // фото или параметры поменялись во время расчёта: этот результат никому не нужен
             continue;
         }
-        st.computed = Some(Computed { generation, paths, alphas });
-        drop(st);
         msg["result_b64"] = json!(jpeg_b64(&result, 90));
+        st.computed = Some(Computed { generation, paths, alphas, result });
+        drop(st);
         msg["mask_b64"] = json!(mask.map(|m| jpeg_b64(&m, 85)));
         ui.send(msg);
     }
@@ -673,6 +720,9 @@ fn save(state: &Shared, ui: &Ui) {
         return;
     };
     let (paths, alphas, lang) = (computed.paths.clone(), computed.alphas.clone(), st.lang);
+    // дорисованные ИИ куски — только если они для этого же результата
+    let patches: Vec<inpaint::Patch> =
+        st.ai.fill.as_ref().filter(|f| f.generation == st.generation).map(|f| f.patches.clone()).unwrap_or_default();
     let s = &st.settings;
     let options = export::Options { width: s.export_width, quality: s.export_quality, format: s.export_format };
     let dims = st.photos[0].dims;
@@ -687,7 +737,8 @@ fn save(state: &Shared, ui: &Ui) {
         (false, true) => format!("_{}", options.width),
         (false, false) if options.format == export::Format::Equirect => format!("_q{}", options.quality),
         (false, false) => String::new(),
-    } + options.format.tag();
+    } + if patches.is_empty() { "" } else { "_ai" }
+        + options.format.tag();
     let mut dialog = rfd::FileDialog::new()
         .set_title(i18n::tr(lang, i18n::Text::SaveTitle))
         .set_file_name(format!("{stem}{suffix}.jpg"))
@@ -708,7 +759,7 @@ fn save(state: &Shared, ui: &Ui) {
     let (state, ui) = (Arc::clone(state), ui.clone());
     std::thread::spawn(move || {
         ui.processing("procSave");
-        let result = export::export(&paths, &alphas, options, &out);
+        let result = export::export(&paths, &alphas, &patches, options, &out);
         let mut st = lock(&state);
         st.exporting = false;
         match result {
@@ -856,6 +907,122 @@ fn install_update(state: &Shared, ui: &Ui, proxy: &EventLoopProxy<UserEvent>) {
                 let _ = proxy.send_event(UserEvent::Quit);
             }
             Err(e) => ui.send(update_msg(&st, Some(("err", "updFailed", json!({"err": e}))))),
+        }
+    });
+}
+
+// ---------------------------------------------------------------- ИИ-дорисовка
+
+fn ai_msg(st: &State) -> Value {
+    json!({
+        "type": "ai",
+        "enabled": st.settings.ai_fill,
+        "model": if inpaint::model_ready() { "ready" } else if st.ai.downloading { "downloading" } else { "missing" },
+        "busy": st.ai.busy,
+        "filled": st.ai.fill.as_ref().is_some_and(|f| f.generation == st.generation),
+    })
+}
+
+fn download_model(state: &Shared, ui: &Ui) {
+    let mut st = lock(state);
+    if st.ai.downloading || inpaint::model_ready() {
+        return;
+    }
+    st.ai.downloading = true;
+    ui.send(ai_msg(&st));
+    drop(st);
+    let (state, ui) = (Arc::clone(state), ui.clone());
+    std::thread::spawn(move || {
+        let total = inpaint::MODEL_BYTES;
+        let result = inpaint::download_model(&|got| {
+            ui.send(json!({"type": "ai_progress", "pct": (got * 100 / total).min(100), "mb": got / 1_000_000}));
+        });
+        let mut st = lock(&state);
+        st.ai.downloading = false;
+        ui.send(ai_msg(&st));
+        drop(st);
+        match result {
+            Ok(()) => ui.status("stAiModelReady", json!({}), false),
+            Err(e) => ui.error("errAiDownload", json!({"err": e})),
+        }
+    });
+}
+
+/// Дорисовывает закрашенное кистью (`dabs`) на текущем результате.
+fn ai_fill(state: &Shared, ui: &Ui, dabs: Vec<inpaint::Dab>) {
+    let mut st = lock(state);
+    if st.ai.busy || !st.settings.ai_fill {
+        return;
+    }
+    if !inpaint::model_ready() {
+        ui.error("errAiNoModel", json!({}));
+        return;
+    }
+    let generation = st.generation;
+    let Some(computed) = st.computed.as_ref().filter(|c| c.generation == generation) else {
+        ui.error("errWaitPreview", json!({}));
+        return;
+    };
+    let (paths, alphas, preview) = (computed.paths.clone(), computed.alphas.clone(), computed.result.clone());
+    st.ai.busy = true;
+    let model = Arc::clone(&st.ai.model);
+    ui.send(ai_msg(&st));
+    drop(st);
+    let (state, ui) = (Arc::clone(state), ui.clone());
+    std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let result = (|| -> Result<(RgbImage, Vec<inpaint::Patch>), String> {
+            let (pw, ph) = preview.dimensions();
+            let mask = inpaint::rasterize(&dabs, pw, ph);
+            if !mask.iter().any(|&m| m) {
+                return Err("empty".into());
+            }
+            ui.processing("procAiCompose");
+            let (mut big, _) = export::compose(&paths, &alphas, AI_WIDTH)?;
+            let mut model = model.lock().unwrap_or_else(|e| e.into_inner());
+            if model.is_none() {
+                ui.processing("procAiLoad");
+                *model = Some(inpaint::Lama::load(&inpaint::model_path())?);
+            }
+            let lama = model.as_mut().ok_or("no model")?;
+            let patches = inpaint::fill(&mut big, &mask, pw, ph, lama, &|i, n| {
+                ui.send(json!({"type": "processing", "key": "procAiRegion", "args": {"i": i + 1, "n": n}}));
+            })?;
+            let mut shown = preview;
+            for p in &patches {
+                p.apply(&mut shown);
+            }
+            Ok((shown, patches))
+        })();
+        let mut st = lock(&state);
+        st.ai.busy = false;
+        match result {
+            Ok((shown, patches)) if st.generation == generation => {
+                let n = patches.len();
+                st.ai.fill = Some(Fill { generation, patches });
+                ui.send(ai_msg(&st));
+                drop(st);
+                ui.send(json!({
+                    "type": "ai_done", "result_b64": jpeg_b64(&shown, 90), "n": n,
+                    "ms": started.elapsed().as_millis(),
+                }));
+            }
+            Ok(_) => {
+                // фото или параметры поменялись, пока шёл расчёт
+                ui.send(ai_msg(&st));
+                drop(st);
+                ui.send(json!({"type": "ai_failed"}));
+            }
+            Err(e) => {
+                ui.send(ai_msg(&st));
+                drop(st);
+                ui.send(json!({"type": "ai_failed"}));
+                match e.as_str() {
+                    "too_big" => ui.error("errAiTooBig", json!({})),
+                    "empty" => ui.error("errAiEmpty", json!({})),
+                    _ => ui.error("errAiFill", json!({"err": e})),
+                }
+            }
         }
     });
 }
