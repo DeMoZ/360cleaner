@@ -42,6 +42,16 @@ impl Format {
         }
     }
 
+    /// Формат, в каком было открытое фото.
+    pub fn of(layout: Layout) -> Self {
+        match layout {
+            Layout::Equirect => Format::Equirect,
+            Layout::Strip => Format::CubeStrip,
+            Layout::Cross => Format::CubeCross,
+            Layout::Faces => Format::CubeFiles,
+        }
+    }
+
     /// Окончание имени файла по умолчанию.
     pub fn tag(self) -> &'static str {
         match self {

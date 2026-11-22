@@ -1247,6 +1247,13 @@ window.onRustMessage = function (msg) {
       updateButtons();
       break;
 
+    // формат сохранения поставлен как у первого фото
+    case 'export_format':
+      exportFormat = msg.format;
+      $('exportFormat').value = exportFormat;
+      renderSizes();
+      break;
+
     case 'size_estimate':
       sizeEstimate = msg;
       renderSizeEstimate();

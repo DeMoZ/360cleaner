@@ -137,6 +137,8 @@ struct State {
     /// Растёт при каждой смене фото или параметров.
     generation: u64,
     computed: Option<Computed>,
+    /// Первое фото, по которому уже выбран формат сохранения (`follow_first_format`).
+    format_for: Option<u64>,
     exporting: bool,
     last_saved: Option<PathBuf>,
     settings: Settings,
@@ -229,6 +231,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         params,
         generation: 0,
         computed: None,
+        format_for: None,
         exporting: false,
         last_saved: None,
         lang: i18n::resolve(&settings.language),
@@ -519,8 +522,25 @@ fn photos_msg(st: &State) -> Value {
     json!({"type": "photos", "list": list})
 }
 
+/// Формат сохранения — как у первого фото (полоса, крест, грани или панорама), один раз на каждое новое первое
+/// фото: потом его можно поменять в окне. Окно узнаёт до списка фото — подписи размеров зависят от формата.
+fn follow_first_format(st: &mut State, ui: &Ui) {
+    let Some((id, (layout, _))) = st.photos.first().and_then(|p| Some((p.id, p.source?))) else { return };
+    if st.format_for == Some(id) {
+        return;
+    }
+    st.format_for = Some(id);
+    let format = export::Format::of(layout);
+    if st.settings.export_format != format {
+        st.settings.export_format = format;
+        st.settings.save();
+        ui.send(json!({"type": "export_format", "format": format}));
+    }
+}
+
 /// После любой смены списка: старый расчёт больше не годится.
 fn photos_changed(st: &mut State, ui: &Ui) {
+    follow_first_format(st, ui);
     st.generation += 1;
     st.computed = None;
     ui.send(photos_msg(st));
