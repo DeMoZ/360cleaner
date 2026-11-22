@@ -652,6 +652,10 @@ fn compute_worker(rx: Receiver<()>, state: Shared, ui: Ui) {
                 msg["angle_a"] = json!(p.angles.angle_a.to_degrees());
                 msg["angle_b"] = json!(p.angles.angle_b.to_degrees());
                 msg["changed"] = json!(p.changed);
+                msg["too_many"] = json!(p.too_many);
+                if p.threshold > params.threshold {
+                    msg["threshold_raised"] = json!(p.threshold);
+                }
                 (p.result, Some(p.mask_vis), vec![p.alpha])
             }
             _ => {

@@ -170,29 +170,79 @@ pub fn erode_mask_360(mask: &[bool], w: u32, h: u32, radius: i32) -> Vec<bool> {
     dilate_mask_360(&inverted, w, h, radius).into_iter().map(|b| !b).collect()
 }
 
-/// Центры двух зон различий на окружности: где на первом кадре стоял человек и где на втором.
+/// Центры двух зон различий на окружности (где на первом кадре стоял человек и где на втором) и границы между зонами.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClusterAngles {
     /// [0, 2π), всегда `angle_a < angle_b`.
     pub angle_a: f32,
     pub angle_b: f32,
+    /// Граница на дуге от A к B (против часовой стрелки), [0, 2π).
+    pub cut_ab: f32,
+    /// Граница на дуге от B к A, [0, 2π).
+    pub cut_ba: f32,
+}
+
+impl ClusterAngles {
+    /// Зоны с границами посередине между центрами.
+    fn with_middle_cuts(angle_a: f32, angle_b: f32) -> Self {
+        let mid = (angle_a + angle_b) / 2.0;
+        ClusterAngles { angle_a, angle_b, cut_ab: mid, cut_ba: (mid + PI).rem_euclid(2.0 * PI) }
+    }
+}
+
+/// Угол против часовой стрелки от `from` до `to`, [0, 2π).
+#[inline(always)]
+fn ccw(from: f32, to: f32) -> f32 {
+    (to - from).rem_euclid(2.0 * PI)
+}
+
+/// Сумма значений столбцов в окне ±`r` вокруг `x` (по горизонтали замкнуто).
+fn window_sum(columns: &[u32], x: usize, r: usize) -> u32 {
+    let w = columns.len();
+    let r = r.min((w - 1) / 2);
+    (0..=2 * r).map(|k| columns[(x + w + k - r) % w]).sum()
+}
+
+/// Граница зон на дуге `from → to` (против часовой стрелки), чтобы она не разрезала человека: столбец, у которого
+/// в окне ±`reach` меньше всего сильных различий (`people` — их число по столбцам), из равных — ближайший к середине
+/// дуги. Шум и разница экспозиции в выбор не входят: из-за них граница уезжала за человека.
+fn emptiest_cut(people: &[u32], reach: usize, from: f32, to: f32) -> f32 {
+    let w = people.len();
+    let arc = ccw(from, to);
+    let mid = from + arc / 2.0;
+    let theta = |x: usize| 2.0 * PI * (x as f32 + 0.5) / w as f32;
+    (0..w)
+        .filter(|&x| {
+            let d = ccw(from, theta(x));
+            d > 0.0 && d < arc
+        })
+        .map(|x| (window_sum(people, x, reach), circular_distance(theta(x), mid), x))
+        .min_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)))
+        .map_or(mid.rem_euclid(2.0 * PI), |(_, _, x)| theta(x))
 }
 
 const BINS: usize = 360;
 
-/// k-средних на окружности с детерминированным началом: самый плотный столбец гистограммы углов и самый плотный
-/// из тех, что дальше 30° от него.
-pub fn find_cluster_angles(mask: &[bool], w: u32, h: u32) -> ClusterAngles {
-    let (w, h) = (w as usize, h as usize);
+/// Сколько отмеченных точек в каждом столбце.
+fn column_counts(mask: &[bool], w: usize) -> Vec<u32> {
     let mut columns = vec![0u32; w];
-    for y in 0..h {
-        for (x, c) in columns.iter_mut().enumerate() {
-            *c += mask[y * w + x] as u32;
+    for row in mask.chunks(w) {
+        for (c, &m) in columns.iter_mut().zip(row) {
+            *c += m as u32;
         }
     }
+    columns
+}
+
+/// Зоны по маске сильных различий `core` (люди без шума, см. `core_mask`). Центры — k-средних на окружности с
+/// детерминированным началом: самый плотный столбец гистограммы углов и самый плотный из тех, что дальше 30° от него.
+/// Границы — `emptiest_cut` не ближе `reach` столбцов к сильным различиям, если так можно.
+pub fn find_cluster_angles(core: &[bool], w: u32, reach: usize) -> ClusterAngles {
+    let w = w as usize;
+    let columns = column_counts(core, w);
     let total: u32 = columns.iter().sum();
     if total < 20 {
-        return ClusterAngles { angle_a: 0.0, angle_b: PI };
+        return ClusterAngles::with_middle_cuts(0.0, PI);
     }
     let theta = |x: usize| 2.0 * PI * (x as f32 + 0.5) / w as f32;
 
@@ -240,14 +290,16 @@ pub fn find_cluster_angles(mask: &[bool], w: u32, h: u32) -> ClusterAngles {
     if ang0 > ang1 {
         std::mem::swap(&mut ang0, &mut ang1);
     }
-    ClusterAngles { angle_a: ang0, angle_b: ang1 }
+    let cut_ab = emptiest_cut(&columns, reach, ang0, ang1);
+    let cut_ba = emptiest_cut(&columns, reach, ang1, ang0);
+    ClusterAngles { angle_a: ang0, angle_b: ang1, cut_ab, cut_ba }
 }
 
-/// Относится ли столбец `x` к зоне A.
+/// Относится ли столбец `x` к зоне A: зона B — дуга от `cut_ab` до `cut_ba` против часовой стрелки (в ней центр B).
 #[inline(always)]
 fn in_zone_a(x: usize, w: usize, angles: ClusterAngles) -> bool {
     let t = 2.0 * PI * (x as f32 + 0.5) / w as f32;
-    circular_distance(t, angles.angle_a) <= circular_distance(t, angles.angle_b)
+    ccw(angles.cut_ab, t) >= ccw(angles.cut_ab, angles.cut_ba)
 }
 
 /// Маска «взять пиксель из второго кадра» до смягчения: без swap — зона A, со swap — зона B.
@@ -325,21 +377,48 @@ pub struct Preview {
     pub angles: ClusterAngles,
     /// Доля пикселей, где кадры различаются.
     pub changed: f32,
+    /// Порог, с которым посчитана маска: выше заданного, если с ним различий было больше `MAX_RAW_CHANGED`.
+    pub threshold: f32,
+    /// Различий слишком много даже с порогом `MAX_AUTO_THRESHOLD`: кадры, видимо, сняты не с одной точки.
+    pub too_many: bool,
+}
+
+/// Доля различий до расширения маски, выше которой порог поднимается сам: при ней в маску попадают шум и разница
+/// экспозиции. На настоящих парах с порогом 24 — до 5,5 %, с порогом 5 — 10–43 %. Доля после расширения для этого
+/// не годится: она зависит от ползунка расширения.
+pub const MAX_RAW_CHANGED: f32 = 0.08;
+/// До какого порога (верх ползунка) он поднимается сам.
+pub const MAX_AUTO_THRESHOLD: f32 = 60.0;
+/// Порог маски для поиска зон: не ниже обычного, чтобы при низком пороге зоны искались по людям, а не по шуму.
+const CORE_THRESHOLD: f32 = 24.0;
+/// Радиус чистки маски для поиска зон: пятна уже 7 точек превью — шум, человек шире.
+const CORE_OPEN: i32 = 3;
+
+fn changed_share(mask: &[bool]) -> f32 {
+    mask.iter().filter(|&&m| m).count() as f32 / mask.len().max(1) as f32
 }
 
 /// Полный расчёт по превью. Кадры одного размера.
 pub fn compute_preview(img1: &RgbImage, img2: &RgbImage, p: Params) -> Preview {
     let (w, h) = img1.dimensions();
     let diff = compute_difference_map(img1, img2);
-    // одиночные точки (шум JPEG, листья) не должны раздуваться расширением
-    let mask = changed_mask(&diff, w, h, p);
-    let angles = find_cluster_angles(&mask, w, h);
+    let mut threshold = p.threshold;
+    let mut raw = changed_share(&opened_mask(&diff, w, h, threshold, 1));
+    while raw > MAX_RAW_CHANGED && threshold < MAX_AUTO_THRESHOLD {
+        threshold = (threshold * 1.15).min(MAX_AUTO_THRESHOLD);
+        raw = changed_share(&opened_mask(&diff, w, h, threshold, 1));
+    }
+    let mask = changed_mask(&diff, w, h, Params { threshold, ..p });
+    let core = opened_mask(&diff, w, h, threshold.max(CORE_THRESHOLD), CORE_OPEN);
+    // граница не ближе расширения и смягчения к человеку: иначе к нему подмешается другой кадр
+    let angles = find_cluster_angles(&core, w, (p.dilate.max(0) + p.feather.max(0)) as usize);
     let target = target_mask(&mask, w, angles, p.swap);
     let alpha = Alpha { w, h, data: feather_alpha(&target, w, h, p.feather) };
     let mut result = img1.clone();
     blend_into(&mut result, img2, &alpha);
-    let changed = mask.iter().filter(|&&m| m).count() as f32 / mask.len().max(1) as f32;
-    Preview { result, mask_vis: mask_visualization(&mask, w, h, angles), alpha, angles, changed }
+    let changed = changed_share(&mask);
+    let too_many = raw > MAX_RAW_CHANGED;
+    Preview { result, mask_vis: mask_visualization(&mask, w, h, angles), alpha, angles, changed, threshold, too_many }
 }
 
 /// Смешивает `img2` в `base` по мягкой маске любого размера (растягивается до размера кадра).
@@ -404,11 +483,16 @@ pub fn median_image(frames: &[RgbImage]) -> RgbImage {
     out
 }
 
-/// Маска различий одного кадра с фоном: порог, удаление точек шума, расширение.
+/// Маска различий: порог, удаление точек шума (одиночные точки — шум JPEG, листья — не должны раздуваться
+/// расширением), расширение.
 fn changed_mask(diff: &[f32], w: u32, h: u32, p: Params) -> Vec<bool> {
-    let raw: Vec<bool> = diff.iter().map(|&d| d > p.threshold).collect();
-    let opened = dilate_mask_360(&erode_mask_360(&raw, w, h, 1), w, h, 1);
-    dilate_mask_360(&opened, w, h, p.dilate)
+    dilate_mask_360(&opened_mask(diff, w, h, p.threshold, 1), w, h, p.dilate)
+}
+
+/// Различия выше порога без пятен меньше круга радиуса `radius` (морфологическое открытие).
+fn opened_mask(diff: &[f32], w: u32, h: u32, threshold: f32, radius: i32) -> Vec<bool> {
+    let raw: Vec<bool> = diff.iter().map(|&d| d > threshold).collect();
+    dilate_mask_360(&erode_mask_360(&raw, w, h, radius), w, h, radius)
 }
 
 /// Маски «взять кадр i» для `blend_sequence`: из долей кадров `weights` (в каждой точке сумма 1).
@@ -606,6 +690,111 @@ mod tests {
         let near = |a: f32, t: f32| circular_distance(a.to_radians(), t.to_radians()).to_degrees() < 15.0;
         let (za, zb) = (deg(a.angles.angle_a), deg(a.angles.angle_b));
         assert!((near(za, 81.0) && near(zb, 0.0)) || (near(zb, 81.0) && near(za, 0.0)), "{za} {zb}");
+    }
+
+    /// Маска из прямоугольников (x0..x1, y0..y1).
+    fn rect_mask(w: u32, h: u32, rects: &[(u32, u32, u32, u32)]) -> Vec<bool> {
+        let mut m = vec![false; (w * h) as usize];
+        for &(x0, x1, y0, y1) in rects {
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    m[(y * w + x) as usize] = true;
+                }
+            }
+        }
+        m
+    }
+
+    /// Все столбцы [x0, x1) в одной зоне.
+    fn one_zone(w: u32, angles: ClusterAngles, x0: u32, x1: u32) -> bool {
+        let zones: Vec<bool> = (x0..x1).map(|x| in_zone_a(x as usize, w as usize, angles)).collect();
+        zones.iter().all(|&z| z == zones[0])
+    }
+
+    #[test]
+    fn zone_border_goes_through_emptiest_column() {
+        let cut = |columns: &[u32], reach: usize, from: f32, to: f32| {
+            emptiest_cut(columns, reach, from.to_radians(), to.to_radians()).to_degrees()
+        };
+        // середина дуги 90°…270° — 180°, там человек; рядом слабее, пусто только в 120…130°
+        let mut columns = vec![1u32; 360];
+        columns[170..190].fill(60);
+        columns[120..131].fill(0);
+        let deg = cut(&columns, 0, 90.0, 270.0);
+        assert!((120.0..131.0).contains(&deg), "cut at {deg}°");
+        // дуга через шов: от 300° до 60°, пусто в 10…20°
+        let mut columns = vec![5u32; 360];
+        columns[10..21].fill(0);
+        let deg = cut(&columns, 0, 300.0, 60.0);
+        assert!((10.0..21.0).contains(&deg), "cut at {deg}°");
+        // граница держится не ближе `reach` к человеку
+        let mut columns = vec![0u32; 360];
+        columns[170..190].fill(60);
+        let deg = cut(&columns, 30, 90.0, 270.0);
+        assert!(!(140.0..220.0).contains(&deg), "cut at {deg}°");
+        // всё пусто — граница посередине, как раньше
+        let deg = cut(&[0u32; 360], 30, 90.0, 270.0);
+        assert!((deg - 180.0).abs() <= 1.0, "cut at {deg}°");
+    }
+
+    #[test]
+    fn zone_border_avoids_people() {
+        // два человека и облака: ни один человек не разрезан границей зон, люди в разных зонах
+        let (w, h) = (360u32, 100u32);
+        let people = [(100, 116, 30, 90), (250, 266, 30, 90)];
+        let mask = rect_mask(w, h, &[people[0], people[1], (0, 70, 0, 30), (180, 240, 0, 20)]);
+        let angles = find_cluster_angles(&mask, w, 0);
+        for &(x0, x1, _, _) in &people {
+            assert!(one_zone(w, angles, x0, x1), "zone border cuts the person at {x0}: {angles:?}");
+        }
+        let za = |x: u32| in_zone_a(x as usize, w as usize, angles);
+        assert_ne!(za(people[0].0), za(people[1].0), "{angles:?}");
+    }
+
+    #[test]
+    fn too_low_threshold_is_raised() {
+        let (w, h) = (400u32, 200u32);
+        // на втором кадре цветной шум: при пороге 5 различия по всему кадру
+        let noisy = |img: RgbImage| {
+            RgbImage::from_fn(w, h, |x, y| {
+                let mut px = img.get_pixel(x, y).0;
+                for (c, v) in px.iter_mut().enumerate() {
+                    let n = ((x.wrapping_mul(7919) ^ y.wrapping_mul(104729) ^ (c as u32 * 31337)) % 13) as u8;
+                    *v = v.saturating_add(6 + n);
+                }
+                image::Rgb(px)
+            })
+        };
+        let img1 = scene(w, h, 80);
+        let img2 = noisy(scene(w, h, 250));
+        let p = Params { threshold: 5.0, dilate: 6, feather: 3, swap: false };
+        let diff = compute_difference_map(&img1, &img2);
+        let raw = changed_share(&opened_mask(&diff, w, h, 5.0, 1));
+        assert!(raw > MAX_RAW_CHANGED, "test scene must have too many differences at threshold 5: {raw}");
+        let low = compute_preview(&img1, &img2, p);
+        assert!(low.threshold > 5.0 && low.threshold <= MAX_AUTO_THRESHOLD, "threshold {}", low.threshold);
+        assert!(changed_share(&opened_mask(&diff, w, h, low.threshold, 1)) <= MAX_RAW_CHANGED);
+        assert!(!low.too_many);
+        // ни один человек не разрезан: в одном из вариантов людей нет
+        let truth = clean(w, h);
+        let best = [false, true]
+            .iter()
+            .map(|&swap| {
+                let r = compute_preview(&img1, &img2, Params { swap, ..p }).result;
+                // шум второго кадра не в счёт: сравниваем только с первым или вторым кадром без людей
+                max_err(&r, &truth).min(max_err(&r, &noisy(truth.clone())))
+            })
+            .min()
+            .unwrap();
+        assert!(best <= 20, "person left, max error {best}");
+        // с нормальным порогом ничего не поднимается
+        let ok = compute_preview(&img1, &scene(w, h, 250), Params { threshold: 24.0, ..p });
+        assert_eq!(ok.threshold, 24.0);
+        // совсем разные кадры: порог упирается в верх, предупреждение остаётся
+        let other = RgbImage::from_fn(w, h, |x, y| image::Rgb([((x * 7 + y * 13) % 256) as u8, (x % 256) as u8, 0]));
+        let bad = compute_preview(&img1, &other, p);
+        assert_eq!(bad.threshold, MAX_AUTO_THRESHOLD);
+        assert!(bad.too_many);
     }
 
     #[test]

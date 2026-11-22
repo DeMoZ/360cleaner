@@ -132,10 +132,10 @@ about 120° is refused: paint it in parts.
 
 | Setting | What it does |
 | :--- | :--- |
-| **Difference threshold** | How different the shots must be (ΔE in Lab). Lower it if clothes match the background; raise it if leaves and noise get caught. |
+| **Difference threshold** | How different the shots must be (ΔE in Lab). Lower it if clothes match the background; raise it if leaves and noise get caught. With two photos, if noise covers too much of the frame, the threshold is raised automatically and the status bar says to what value. |
 | **Silhouette and shadow** | How far to grow the found area: hair, clothing edges, the shadow on the floor. |
 | **Seam softness** | Width of the smooth blend between shots. |
-| **Swap zones** | Two photos only: swaps which shot each of the two zones comes from. |
+| **Swap zones** | Two photos only: swaps which shot each of the two zones comes from. The border between the zones keeps clear of people, so nobody is cut in half. |
 | **Difference map** | Two photos: blue zone A and red zone B, where people were found. Three or more: each area in the color of the shot it was taken from (the same dot as in the photo list). |
 | **Format** | 360° panorama or a cubemap: 6 files, strip 6×1 or cross 4×3 (see above). |
 | **Size, JPEG quality** | How to save the result. No upscaling: sizes larger than the original aren't offered. Next to the quality, the approximate file size is shown while you move the slider. |
