@@ -29,7 +29,7 @@ how many photos you add:
 
 | Photos | Mode | What you get |
 | :---: | :--- | :--- |
-| **1** | Re-save | Nothing to remove: the panorama is saved again at the size and quality you pick. |
+| **1** | Re-save | Nothing to remove: the panorama is saved again at the size and quality you pick. With [AI fill](#-ai-fill-optional) on, you can paint the photographer out. |
 | **2** | Photographer | You stand on opposite sides in the two shots; each spot is taken from the shot where you aren't. |
 | **3+** | Passers-by | For crowded places: each area is taken from a shot where nobody is there. |
 
@@ -74,7 +74,9 @@ After that the app updates itself: the version button in the top-right corner, p
 3. **Drop the photos** into the window (all at once), or click the field at the top. They appear in the list at the
    bottom: click one to view it, ✕ removes it, **Clear list** removes all.
 4. With two photos, if you're still in the picture, press **Swap zones** (key <kbd>S</kbd>).
-5. Pick the **format**, **size** and **quality**, then **Save 360°**.
+5. Something left that no shot shows (a single photo, a tripod leg)? Turn on [AI fill](#-ai-fill-optional) and
+   paint over it.
+6. Pick the **format**, **size** and **quality**, then **Save 360°**.
 
 > [!TIP]
 > It works best when nothing changes between shots except people: fixed exposure (manual mode), no wind.
@@ -126,7 +128,7 @@ tripod leg. Paint over it and the [LaMa](https://github.com/advimman/lama) model
 Everything runs on your computer; photos aren't sent anywhere. What the model paints is made up, not photographed:
 filled areas are marked in the window, and the saved file gets `_ai` in its name. The model works at 512×512, so a
 large area (a person right next to the camera) comes out softer than the rest of an 8K panorama. An area wider than
-about 120° is refused: paint it in parts.
+about 120° is refused: paint it in parts. On Windows AI fill hasn't been tried on a real machine yet.
 
 ## 🎛 Settings
 
